@@ -1,0 +1,31 @@
+# node.js
+node_modules/
+npm-debug.log
+yarn-error.log
+
+# expo
+.expo/
+dist/
+web-build/
+.expo-shared/
+
+# native
+ios/
+android/
+
+# secret
+.env
+.env.local
+
+# ide
+.vscode/
+.idea/
+*.suo
+*.ntvs*
+*.njsproj
+*.sln
+*.sw?
+
+# system
+.DS_Store
+Thumbs.db
