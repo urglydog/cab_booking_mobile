@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Bell, ChevronLeft, CheckCheck } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { IP_ADDRESS } from '@/services/api';
+import api, { NOTIFICATION_SERVICE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
@@ -16,7 +16,7 @@ export default function NotificationsModal() {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
       
-      const response = await api.get(`/api/notifications/user/${userId}?page=0&size=50`);
+      const response = await api.get(`${NOTIFICATION_SERVICE_URL}/api/notifications/user/${userId}?page=0&size=50`);
       const content = response.data?.content || response.data?.result?.content || [];
       setNotifications(content);
     } catch (error) {
@@ -26,21 +26,51 @@ export default function NotificationsModal() {
     }
   };
 
+  const handleMarkAsRead = async (id: string) => {
+    try {
+      await api.patch(`/api/notifications/${id}/read`);
+      setNotifications(prev => prev.map(n => n.id === id ? { ...n, read: true } : n));
+    } catch (error) {
+      console.error('Failed to mark as read:', error);
+    }
+  };
+
+  const handleMarkAllAsRead = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('user_id');
+      if (!userId) return;
+      await api.patch(`/api/notifications/user/${userId}/read-all`);
+      setNotifications(prev => prev.map(n => ({ ...n, read: true })));
+    } catch (error) {
+      console.error('Failed to mark all as read:', error);
+    }
+  };
+
+  const formatTime = (dateStr: string) => {
+    // If date string doesn't have timezone info, append 'Z' to treat as UTC from backend
+    const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
+    return date.toLocaleString('vi-VN');
+  };
+
   useEffect(() => {
     fetchNotifications();
   }, []);
 
   const renderItem = ({ item }) => (
-    <View style={[styles.notificationItem, !item.read && styles.unreadItem]}>
+    <TouchableOpacity 
+      style={[styles.notificationItem, !item.read && styles.unreadItem]}
+      onPress={() => !item.read && handleMarkAsRead(item.id)}
+      activeOpacity={0.7}
+    >
       <View style={styles.iconContainer}>
         <Bell size={20} color={item.read ? '#999' : Colors.light.primary} />
       </View>
       <View style={styles.contentContainer}>
         <Text style={styles.notifTitle}>{item.title}</Text>
         <Text style={styles.notifMessage}>{item.message}</Text>
-        <Text style={styles.notifTime}>{new Date(item.createdAt).toLocaleString()}</Text>
+        <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
       </View>
-    </View>
+    </TouchableOpacity>
   );
 
   return (
@@ -50,7 +80,7 @@ export default function NotificationsModal() {
           <ChevronLeft size={24} color="#333" />
         </TouchableOpacity>
         <Text style={styles.title}>Notifications</Text>
-        <TouchableOpacity>
+        <TouchableOpacity onPress={handleMarkAllAsRead}>
           <CheckCheck size={24} color={Colors.light.primary} />
         </TouchableOpacity>
       </View>
@@ -115,7 +145,7 @@ const styles = StyleSheet.create({
     borderBottomColor: '#F2F2F2',
   },
   unreadItem: {
-    backgroundColor: '#F7FFF9',
+    backgroundColor: '#EEF2FF',
   },
   iconContainer: {
     width: 40,
