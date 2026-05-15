@@ -3,9 +3,11 @@ import React from 'react';
 import { Home, History, MessageSquare, User } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { useColorScheme } from '@/hooks/use-color-scheme';
+import { useSocket } from '@/hooks/useSocket';
 
 export default function TabLayout() {
   const colorScheme = useColorScheme() ?? 'light';
+  const { unreadCount } = useSocket();
 
   return (
     <Tabs
@@ -39,6 +41,11 @@ export default function TabLayout() {
         options={{
           title: 'Messages',
           tabBarIcon: ({ color }) => <MessageSquare size={24} color={color} />,
+          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadgeStyle: {
+            backgroundColor: Colors[colorScheme].error,
+            fontSize: 10,
+          }
         }}
       />
       <Tabs.Screen

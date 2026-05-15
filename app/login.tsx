@@ -48,7 +48,7 @@ export default function LoginScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <Text style={styles.logo}>Grab</Text>
+        <Text style={styles.logo}>CAB</Text>
         <Text style={styles.subtitle}>Welcome back! Please login to continue.</Text>
 
         <View style={styles.inputContainer}>
@@ -104,67 +104,74 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   logo: {
-    fontSize: 48,
-    fontWeight: 'bold',
-    color: '#00B14F',
+    fontSize: 56,
+    fontWeight: '900',
+    color: '#6366F1',
     textAlign: 'center',
-    marginBottom: 10,
+    marginBottom: 8,
+    letterSpacing: -2,
   },
   subtitle: {
-    fontSize: 16,
-    color: '#666',
+    fontSize: 15,
+    color: '#64748B',
     textAlign: 'center',
-    marginBottom: 40,
+    marginBottom: 48,
+    lineHeight: 22,
   },
   inputContainer: {
-    marginBottom: 20,
+    marginBottom: 24,
   },
   label: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#333',
+    fontSize: 13,
+    fontWeight: '700',
+    color: '#475569',
     marginBottom: 8,
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
   },
   input: {
-    height: 50,
-    borderWidth: 1,
-    borderColor: '#E2E2E2',
-    borderRadius: 12,
-    paddingHorizontal: 15,
+    height: 54,
+    borderWidth: 1.5,
+    borderColor: '#E2E8F0',
+    borderRadius: 16,
+    paddingHorizontal: 16,
     fontSize: 16,
-    backgroundColor: '#F9F9F9',
+    backgroundColor: '#F8FAFC',
+    color: '#1E293B',
   },
   button: {
-    height: 55,
-    backgroundColor: '#00B14F',
-    borderRadius: 12,
+    height: 58,
+    backgroundColor: '#6366F1',
+    borderRadius: 16,
     justifyContent: 'center',
     alignItems: 'center',
-    marginTop: 20,
-    shadowColor: '#00B14F',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.2,
-    shadowRadius: 8,
-    elevation: 5,
+    marginTop: 24,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.25,
+    shadowRadius: 15,
+    elevation: 8,
   },
   buttonDisabled: {
-    opacity: 0.7,
+    backgroundColor: '#94A3B8',
+    shadowOpacity: 0,
   },
   buttonText: {
     color: '#fff',
     fontSize: 18,
-    fontWeight: 'bold',
+    fontWeight: '800',
+    letterSpacing: 0.5,
   },
   registerLink: {
-    marginTop: 30,
+    marginTop: 32,
     alignItems: 'center',
   },
   registerText: {
-    color: '#666',
-    fontSize: 14,
+    color: '#64748B',
+    fontSize: 15,
   },
   registerHighlight: {
-    color: '#00B14F',
-    fontWeight: 'bold',
+    color: '#6366F1',
+    fontWeight: '800',
   }
 });

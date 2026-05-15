@@ -6,10 +6,11 @@ export const IP_ADDRESS = '192.168.1.179';
 export const GATEWAY_URL = `http://${IP_ADDRESS}:8080`;
 export const BOOKING_SERVICE_URL = `http://${IP_ADDRESS}:8084`; 
 export const AUTH_SERVICE_URL = `http://${IP_ADDRESS}:8081`;
+export const NOTIFICATION_SERVICE_URL = `http://${IP_ADDRESS}:8092`;
 
 const api = axios.create({
   baseURL: GATEWAY_URL, // Default to Gateway
-  timeout: 15000,
+  timeout: 30000, // Increased to 30s for stability during startup
   headers: {
     'Content-Type': 'application/json',
   },

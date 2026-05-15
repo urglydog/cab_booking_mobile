@@ -7,7 +7,7 @@ import { Colors } from '@/constants/Colors';
 const MOCK_MESSAGES = [
   {
     id: '1',
-    name: 'Grab Support',
+    name: 'CAB Support',
     message: 'Your refund for ride #12345 has been processed.',
     time: '09:41',
     unread: true,

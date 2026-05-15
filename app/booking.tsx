@@ -5,12 +5,14 @@ import { Car, Bike, MapPin, Navigation, CreditCard, ChevronLeft } from 'lucide-r
 import { Colors } from '@/constants/Colors';
 import api, { GATEWAY_URL, BOOKING_SERVICE_URL } from '@/services/api';
 import { useRouter } from 'expo-router';
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
 export default function BookingScreen() {
   const router = useRouter();
   const [pickup, setPickup] = useState('12 Nguyen Van Bao, Go Vap');
   const [dropoff, setDropoff] = useState('');
   const [vehicleType, setVehicleType] = useState('CAR');
+  const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [loading, setLoading] = useState(false);
 
   const handleBooking = async () => {
@@ -25,7 +27,7 @@ export default function BookingScreen() {
         pickupLocation: pickup,
         dropoffLocation: dropoff,
         vehicleType: vehicleType,
-        paymentMethod: 'CASH',
+        paymentMethod: paymentMethod,
         estimatedFare: vehicleType === 'CAR' ? 55000 : 25000,
         customerNote: 'Please pick me up at the main gate',
         idempotencyKey: Math.random().toString(36).substring(7)
@@ -40,9 +42,11 @@ export default function BookingScreen() {
       console.log('📄 Response Data:', JSON.stringify(response.data, null, 2));
 
       if (response.status === 200 || response.status === 201) {
-        Alert.alert('Success', 'Your ride has been booked!', [
-          { text: 'OK', onPress: () => router.replace('/(tabs)/explore') }
-        ]);
+        const bookingId = response.data?.result?.id || response.data?.id;
+        router.replace({
+          pathname: '/matching',
+          params: { bookingId: bookingId }
+        });
       }
     } catch (error: any) {
       console.error('Booking Error:', error);
@@ -63,6 +67,24 @@ export default function BookingScreen() {
       </View>
 
       <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+        {/* Real Map Preview */}
+        <View style={styles.mapContainer}>
+          <MapView
+            style={styles.map}
+            initialRegion={{
+              latitude: 10.8231,
+              longitude: 106.6631,
+              latitudeDelta: 0.02,
+              longitudeDelta: 0.02,
+            }}
+          >
+            <Marker
+              coordinate={{ latitude: 10.8231, longitude: 106.6631 }}
+              pinColor="#00B14F"
+            />
+          </MapView>
+        </View>
+
         {/* Booking Form Card */}
         <View style={styles.card}>
           <View style={styles.inputGroup}>
@@ -109,7 +131,7 @@ export default function BookingScreen() {
             <View style={[styles.vehicleIcon, vehicleType === 'CAR' && styles.activeIcon]}>
               <Car size={32} color={vehicleType === 'CAR' ? '#fff' : '#666'} />
             </View>
-            <Text style={styles.vehicleLabel}>GrabCar</Text>
+            <Text style={styles.vehicleLabel}>CAB Car</Text>
             <Text style={styles.vehiclePrice}>~55k</Text>
           </TouchableOpacity>
 
@@ -120,21 +142,42 @@ export default function BookingScreen() {
             <View style={[styles.vehicleIcon, vehicleType === 'BIKE' && styles.activeIcon]}>
               <Bike size={32} color={vehicleType === 'BIKE' ? '#fff' : '#666'} />
             </View>
-            <Text style={styles.vehicleLabel}>GrabBike</Text>
+            <Text style={styles.vehicleLabel}>CAB Bike</Text>
             <Text style={styles.vehiclePrice}>~25k</Text>
           </TouchableOpacity>
         </View>
 
         {/* Payment Method */}
-        <View style={styles.paymentCard}>
-          <View style={styles.paymentInfo}>
-            <CreditCard size={20} color="#666" />
-            <Text style={styles.paymentText}>Cash Payment</Text>
-          </View>
-          <TouchableOpacity>
-            <Text style={styles.changeText}>Change</Text>
+        <Text style={styles.sectionTitle}>Payment Method</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.paymentList}>
+          <TouchableOpacity 
+            style={[styles.paymentItem, paymentMethod === 'CASH' && styles.activePayment]}
+            onPress={() => setPaymentMethod('CASH')}
+          >
+            <CreditCard size={24} color={paymentMethod === 'CASH' ? '#00B14F' : '#666'} />
+            <Text style={[styles.paymentLabel, paymentMethod === 'CASH' && styles.activePaymentText]}>Tiền mặt</Text>
           </TouchableOpacity>
-        </View>
+
+          <TouchableOpacity 
+            style={[styles.paymentItem, paymentMethod === 'MOMO' && styles.activePayment]}
+            onPress={() => setPaymentMethod('MOMO')}
+          >
+            <View style={[styles.paymentLogo, { backgroundColor: '#A50064' }]}>
+              <Text style={styles.logoText}>M</Text>
+            </View>
+            <Text style={[styles.paymentLabel, paymentMethod === 'MOMO' && styles.activePaymentText]}>MoMo</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity 
+            style={[styles.paymentItem, paymentMethod === 'ZALOPAY' && styles.activePayment]}
+            onPress={() => setPaymentMethod('ZALOPAY')}
+          >
+            <View style={[styles.paymentLogo, { backgroundColor: '#0068FF' }]}>
+              <Text style={styles.logoText}>Z</Text>
+            </View>
+            <Text style={[styles.paymentLabel, paymentMethod === 'ZALOPAY' && styles.activePaymentText]}>ZaloPay</Text>
+          </TouchableOpacity>
+        </ScrollView>
 
         {/* Book Button */}
         <TouchableOpacity 
@@ -177,17 +220,26 @@ const styles = StyleSheet.create({
     marginLeft: 10,
   },
   scrollContent: {
-    padding: 20,
+    paddingBottom: 20,
+  },
+  mapContainer: {
+    height: 200,
+    width: '100%',
+    marginBottom: -20,
+  },
+  map: {
+    flex: 1,
   },
   card: {
+    marginHorizontal: 20,
     backgroundColor: '#fff',
     borderRadius: 20,
     padding: 20,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.05,
+    shadowOpacity: 0.1,
     shadowRadius: 10,
-    elevation: 3,
+    elevation: 5,
     marginBottom: 25,
   },
   inputGroup: {
@@ -239,11 +291,13 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#111',
     marginBottom: 15,
+    paddingHorizontal: 20,
   },
   vehicleGrid: {
     flexDirection: 'row',
     gap: 15,
     marginBottom: 25,
+    paddingHorizontal: 20,
   },
   vehicleItem: {
     flex: 1,
@@ -260,8 +314,8 @@ const styles = StyleSheet.create({
     elevation: 2,
   },
   activeVehicle: {
-    borderColor: '#00B14F',
-    backgroundColor: '#F0FFF5',
+    borderColor: '#6366F1',
+    backgroundColor: '#EEF2FF',
   },
   vehicleIcon: {
     width: 60,
@@ -273,7 +327,7 @@ const styles = StyleSheet.create({
     marginBottom: 10,
   },
   activeIcon: {
-    backgroundColor: '#00B14F',
+    backgroundColor: '#6366F1',
   },
   vehicleLabel: {
     fontSize: 14,
@@ -304,22 +358,64 @@ const styles = StyleSheet.create({
     fontWeight: '500',
   },
   changeText: {
-    color: '#00B14F',
+    color: '#6366F1',
+    fontWeight: '800',
+  },
+  paymentList: {
+    marginBottom: 25,
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+  },
+  paymentItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 12,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 10,
+  },
+  activePayment: {
+    borderColor: '#6366F1',
+    backgroundColor: '#EEF2FF',
+  },
+  paymentLabel: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  activePaymentText: {
+    color: '#6366F1',
+  },
+  paymentLogo: {
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  logoText: {
+    color: '#fff',
+    fontSize: 12,
     fontWeight: 'bold',
   },
   bookButton: {
-    backgroundColor: '#00B14F',
-    height: 56,
-    borderRadius: 16,
+    marginHorizontal: 20,
+    backgroundColor: '#6366F1',
+    height: 58,
+    borderRadius: 18,
     flexDirection: 'row',
     justifyContent: 'center',
     alignItems: 'center',
-    gap: 10,
-    shadowColor: '#00B14F',
-    shadowOffset: { width: 0, height: 4 },
+    gap: 12,
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 10 },
     shadowOpacity: 0.3,
-    shadowRadius: 8,
-    elevation: 5,
+    shadowRadius: 15,
+    elevation: 8,
   },
   disabledButton: {
     backgroundColor: '#CCC',

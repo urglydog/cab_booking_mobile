@@ -6,35 +6,36 @@ import { IP_ADDRESS } from '@/services/api';
 interface SocketContextType {
   socket: Socket | null;
   isConnected: boolean;
+  unreadCount: number;
+  setUnreadCount: (count: number) => void;
 }
 
-const SocketContext = createContext<SocketContextType>({ socket: null, isConnected: false });
+const SocketContext = createContext<SocketContextType>({ 
+  socket: null, 
+  isConnected: false, 
+  unreadCount: 0,
+  setUnreadCount: () => {}
+});
 
 export const useSocket = () => useContext(SocketContext);
 
 export const SocketProvider: React.FC<{ children: React.ReactNode, userId: string }> = ({ children, userId }) => {
   const [socket, setSocket] = useState<Socket | null>(null);
   const [isConnected, setIsConnected] = useState(false);
+  const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    // Replace with your notification-service URL (and port 9092 as configured)
     const newSocket = io(`http://${IP_ADDRESS}:8092`, {
       query: { userId },
       transports: ['websocket'],
     });
 
     newSocket.on('connect', () => {
-      console.log('Connected to notification socket');
       setIsConnected(true);
     });
 
-    newSocket.on('disconnect', () => {
-      console.log('Disconnected from notification socket');
-      setIsConnected(false);
-    });
-
     newSocket.on('new_notification', (data) => {
-      console.log('New notification received:', data);
+      setUnreadCount(prev => prev + 1);
       Alert.alert(data.title || 'Notification', data.message || 'You have a new update');
     });
 
@@ -46,7 +47,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
   }, [userId]);
 
   return (
-    <SocketContext.Provider value={{ socket, isConnected }}>
+    <SocketContext.Provider value={{ socket, isConnected, unreadCount, setUnreadCount }}>
       {children}
     </SocketContext.Provider>
   );

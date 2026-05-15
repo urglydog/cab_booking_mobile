@@ -10,26 +10,19 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { socket } = useSocket();
-  const [notificationCount, setNotificationCount] = React.useState(0);
-  const [latestNotification, setLatestNotification] = React.useState('Welcome to Grab! Book your first ride now.');
+  const { socket, setUnreadCount } = useSocket();
+  const [latestNotification, setLatestNotification] = React.useState('Welcome to CAB Booking! Book your first ride now.');
 
   const fetchLatestNotification = async () => {
     try {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
       
-      // Call via Gateway (port 8080) - matches /api/notifications/** predicate
       const response = await api.get(`/api/notifications/user/${userId}?page=0&size=1`);
-      
       const content = response.data?.content || response.data?.result?.content;
       
       if (content && content.length > 0) {
-        const notif = content[0];
-        setLatestNotification(notif.message);
-        if (!notif.read) {
-          setNotificationCount(1);
-        }
+        setLatestNotification(content[0].message);
       }
     } catch (error) {
       console.log('Failed to fetch notifications:', error);
@@ -41,7 +34,6 @@ export default function HomeScreen() {
     
     if (socket) {
       socket.on('new_notification', (data: any) => {
-        setNotificationCount(prev => prev + 1);
         setLatestNotification(data.message || 'New update for your ride!');
       });
     }
@@ -67,17 +59,12 @@ export default function HomeScreen() {
           <TouchableOpacity 
             style={styles.iconButton} 
             onPress={() => {
-              setNotificationCount(0);
+              setUnreadCount(0);
               router.push('/modal');
             }}
           >
             <View>
               <Bell size={24} color={Colors.light.text} />
-              {notificationCount > 0 && (
-                <View style={styles.badge}>
-                  <Text style={styles.badgeText}>{notificationCount}</Text>
-                </View>
-              )}
             </View>
           </TouchableOpacity>
         </View>
@@ -246,13 +233,18 @@ const styles = StyleSheet.create({
   promoBanner: {
     marginHorizontal: 20,
     marginTop: 25,
-    backgroundColor: '#00B14F',
-    borderRadius: 16,
+    backgroundColor: '#6366F1',
+    borderRadius: 20,
     padding: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
     overflow: 'hidden',
+    shadowColor: '#6366F1',
+    shadowOffset: { width: 0, height: 8 },
+    shadowOpacity: 0.2,
+    shadowRadius: 12,
+    elevation: 6,
   },
   promoTextContainer: {
     flex: 1,
@@ -276,8 +268,8 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   promoButtonText: {
-    color: '#00B14F',
-    fontWeight: 'bold',
+    color: '#6366F1',
+    fontWeight: '800',
     fontSize: 12,
   },
   promoImagePlaceholder: {
@@ -302,8 +294,8 @@ const styles = StyleSheet.create({
     color: '#111',
   },
   seeAll: {
-    color: '#00B14F',
-    fontWeight: '600',
+    color: '#6366F1',
+    fontWeight: '700',
   },
   destinationItem: {
     flexDirection: 'row',
@@ -355,33 +347,18 @@ const styles = StyleSheet.create({
   notificationCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#E8F5E9',
+    backgroundColor: '#EEF2FF',
     padding: 15,
-    borderRadius: 12,
+    borderRadius: 16,
     marginTop: 10,
     gap: 12,
+    borderWidth: 1,
+    borderColor: '#E0E7FF',
   },
   notificationText: {
     fontSize: 14,
-    color: '#2E7D32',
+    color: '#3730A3',
     flex: 1,
-  },
-  badge: {
-    position: 'absolute',
-    right: -6,
-    top: -6,
-    backgroundColor: '#FF4444',
-    borderRadius: 10,
-    width: 20,
-    height: 20,
-    justifyContent: 'center',
-    alignItems: 'center',
-    borderWidth: 2,
-    borderColor: '#fff',
-  },
-  badgeText: {
-    color: '#fff',
-    fontSize: 10,
-    fontWeight: 'bold',
+    fontWeight: '500',
   }
 });

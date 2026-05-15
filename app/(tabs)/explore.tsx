@@ -5,8 +5,10 @@ import { Car, Bike, ChevronRight, History } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import api, { BOOKING_SERVICE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter } from 'expo-router';
 
 export default function ActivityScreen() {
+  const router = useRouter();
   const [bookings, setBookings] = useState([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
@@ -60,7 +62,20 @@ export default function ActivityScreen() {
         </Text>
       </View>
       <View style={styles.priceContainer}>
-        <Text style={styles.price}>{item.estimatedFare?.toLocaleString()}đ</Text>
+        <View style={{ alignItems: 'flex-end' }}>
+          <Text style={styles.price}>{item.estimatedFare?.toLocaleString()}đ</Text>
+          {item.status === 'COMPLETED' && (
+            <TouchableOpacity 
+              style={styles.rateButton}
+              onPress={() => router.push({
+                pathname: '/review',
+                params: { rideId: item.id, driverId: item.driverId }
+              })}
+            >
+              <Text style={styles.rateButtonText}>Đánh giá</Text>
+            </TouchableOpacity>
+          )}
+        </View>
         <ChevronRight size={20} color="#CCC" />
       </View>
     </TouchableOpacity>
@@ -164,6 +179,18 @@ const styles = StyleSheet.create({
   },
   price: {
     fontSize: 14,
+    fontWeight: 'bold',
+    color: '#333',
+  },
+  rateButton: {
+    backgroundColor: '#FFD700',
+    paddingHorizontal: 12,
+    paddingVertical: 4,
+    borderRadius: 12,
+    marginTop: 5,
+  },
+  rateButtonText: {
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#333',
   }

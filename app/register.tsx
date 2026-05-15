@@ -50,7 +50,7 @@ export default function RegisterScreen() {
     <SafeAreaView style={styles.container}>
       <ScrollView contentContainerStyle={styles.scrollContent}>
         <View style={styles.content}>
-          <Text style={styles.logo}>Grab</Text>
+          <Text style={styles.logo}>CAB</Text>
           <Text style={styles.title}>Create Account</Text>
           <Text style={styles.subtitle}>Join us today and experience the best service.</Text>
 

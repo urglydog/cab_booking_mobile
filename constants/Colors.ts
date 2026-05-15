@@ -1,41 +1,43 @@
 /**
- * Grab-inspired color palette
+ * Premium CAB Booking color palette
  */
 
-const tintColorLight = '#00B14F';
-const tintColorDark = '#fff';
+const tintColorLight = '#6366F1'; // Indigo 500
+const tintColorDark = '#818CF8'; // Indigo 400
 
 export const Colors = {
   light: {
-    text: '#11181C',
-    background: '#fff',
+    text: '#1E293B',
+    background: '#FFFFFF',
     tint: tintColorLight,
-    icon: '#687076',
-    tabIconDefault: '#687076',
+    icon: '#64748B',
+    tabIconDefault: '#94A3B8',
     tabIconSelected: tintColorLight,
-    primary: '#00B14F',
-    secondary: '#494949',
-    error: '#E02020',
-    warning: '#FFB800',
-    info: '#006CFF',
-    success: '#00B14F',
-    muted: '#F2F2F2',
-    border: '#EAEAEA',
+    primary: '#6366F1',
+    secondary: '#4F46E5',
+    error: '#EF4444',
+    warning: '#F59E0B',
+    info: '#3B82F6',
+    success: '#10B981',
+    muted: '#F1F5F9',
+    border: '#E2E8F0',
+    card: '#F8FAFC',
   },
   dark: {
-    text: '#ECEDEE',
-    background: '#151718',
+    text: '#F8FAFC',
+    background: '#0F172A',
     tint: tintColorDark,
-    icon: '#9BA1A6',
-    tabIconDefault: '#9BA1A6',
+    icon: '#94A3B8',
+    tabIconDefault: '#475569',
     tabIconSelected: tintColorDark,
-    primary: '#00B14F',
-    secondary: '#A1A1A1',
-    error: '#FF4D4D',
-    warning: '#FFCC00',
-    info: '#4D9FFF',
-    success: '#00B14F',
-    muted: '#2A2A2A',
-    border: '#333333',
+    primary: '#818CF8',
+    secondary: '#6366F1',
+    error: '#F87171',
+    warning: '#FBBF24',
+    info: '#60A5FA',
+    success: '#34D399',
+    muted: '#1E293B',
+    border: '#334155',
+    card: '#1E293B',
   },
 };
