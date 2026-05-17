@@ -16,7 +16,7 @@ export default function NotificationsModal() {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
       
-      const response = await api.get(`${NOTIFICATION_SERVICE_URL}/api/notifications/user/${userId}?page=0&size=50`);
+      const response = await api.get(`/api/notifications/user/${userId}?page=0&size=50`);
       const content = response.data?.content || response.data?.result?.content || [];
       setNotifications(content);
     } catch (error) {

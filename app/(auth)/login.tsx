@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import api, { AUTH_SERVICE_URL } from '@/services/api';
+import api, { GATEWAY_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 
@@ -20,12 +20,12 @@ export default function LoginScreen() {
 
     setLoading(true);
     try {
-      const response = await api.post('/auth/login', {
+      const response = await api.post('/api/auth/login', {
         email,
         password,
         deviceId: 'mobile-app',
         platform: 'ANDROID',
-      }, { baseURL: AUTH_SERVICE_URL }); // Go direct to Auth Service
+      }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       const { accessToken, refreshToken, user } = response.data.result;
       

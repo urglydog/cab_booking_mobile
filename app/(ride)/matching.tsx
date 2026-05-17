@@ -11,7 +11,7 @@ export default function MatchingScreen() {
   const router = useRouter();
   const { bookingId } = useLocalSearchParams();
   const { socket } = useSocket();
-  
+
   const [status, setStatus] = useState('FINDING'); // FINDING, FOUND, ARRIVING, STARTED, COMPLETED
   const [driverInfo, setDriverInfo] = useState<any>(null);
 
@@ -19,9 +19,9 @@ export default function MatchingScreen() {
     if (socket) {
       const handleNotification = (data: any) => {
         console.log('Matching Screen received notification:', data);
-        
+
         const message = data.message || '';
-        
+
         // Check for specific states first
         if (message.includes('tìm thấy tài xế') || message.includes('assigned')) {
           setStatus('FOUND');
@@ -68,7 +68,7 @@ export default function MatchingScreen() {
           <ChevronLeft size={28} color="#111" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Trạng thái chuyến xe</Text>
-        <TouchableOpacity 
+        <TouchableOpacity
           onPress={() => router.replace('/(tabs)')}
           style={styles.homeButton}
         >
@@ -114,9 +114,9 @@ export default function MatchingScreen() {
             <View style={styles.driverInfo}>
               <View style={styles.driverHeader}>
                 <View style={styles.avatarPlaceholder}>
-                  <Image 
-                    source={{ uri: 'https://i.pravatar.cc/150?u=driver' }} 
-                    style={styles.avatar} 
+                  <Image
+                    source={{ uri: 'https://i.pravatar.cc/150?u=driver' }}
+                    style={styles.avatar}
                   />
                 </View>
                 <View style={styles.driverDetails}>

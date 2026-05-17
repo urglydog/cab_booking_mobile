@@ -42,9 +42,8 @@ export default function RootLayout() {
 
     const inTabsGroup = segments[0] === '(tabs)';
 
-    if (!hasToken && inTabsGroup) {
-      router.replace('/login');
-    } else if (hasToken && segments[0] === 'login') {
+    // Removed mandatory redirect for tabs to allow guest access
+    if (hasToken && segments[0] === '(auth)') {
       router.replace('/(tabs)');
     }
   }, [hasToken, isReady, segments]);
@@ -55,10 +54,12 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="login" options={{ headerShown: false }} />
-        <Stack.Screen name="register" options={{ headerShown: true, title: 'Register' }} />
-        <Stack.Screen name="booking" options={{ headerShown: false }} />
-        <Stack.Screen name="modal" options={{ presentation: 'modal', title: 'Notifications' }} />
+        <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)/register" options={{ headerShown: true, title: 'Register' }} />
+        <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
+        <Stack.Screen name="(ride)/matching" options={{ headerShown: false }} />
+        <Stack.Screen name="(review)/review" options={{ headerShown: false }} />
+        <Stack.Screen name="(notification)/modal" options={{ presentation: 'modal', title: 'Notifications' }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>

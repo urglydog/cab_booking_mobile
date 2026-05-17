@@ -8,12 +8,15 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function AccountScreen() {
   const router = useRouter();
-  const [userName, setUserName] = useState('User');
+  const [userName, setUserName] = useState('Guest User');
+  const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
     const loadUser = async () => {
       const name = await AsyncStorage.getItem('user_name');
+      const token = await AsyncStorage.getItem('access_token');
       if (name) setUserName(name);
+      if (token) setIsAuth(true);
     };
     loadUser();
   }, []);
@@ -45,23 +48,49 @@ export default function AccountScreen() {
             <User size={40} color="#fff" />
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{userName}</Text>
-            <View style={styles.ratingContainer}>
-              <Star size={16} color={Colors.light.warning} fill={Colors.light.warning} />
-              <Text style={styles.ratingText}>4.9 • Gold Member</Text>
-            </View>
+            <Text style={styles.profileName}>{isAuth ? userName : 'Welcome to CAB'}</Text>
+            {isAuth ? (
+              <View style={styles.ratingContainer}>
+                <Star size={16} color={Colors.light.warning} fill={Colors.light.warning} />
+                <Text style={styles.ratingText}>4.9 • Gold Member</Text>
+              </View>
+            ) : (
+              <Text style={styles.ratingText}>Please login to continue</Text>
+            )}
           </View>
-          <TouchableOpacity style={styles.editButton}>
-            <Settings size={20} color={Colors.light.icon} />
-          </TouchableOpacity>
+          {isAuth && (
+            <TouchableOpacity style={styles.editButton}>
+              <Settings size={20} color={Colors.light.icon} />
+            </TouchableOpacity>
+          )}
         </View>
 
-        {/* Stats Row */}
-        <View style={styles.statsRow}>
-          <StatItem label="Points" value="1,240" />
-          <StatItem label="Rewards" value="3" />
-          <StatItem label="Saved" value="150k" />
-        </View>
+        {!isAuth ? (
+          <View style={{ paddingHorizontal: 20, marginTop: 10 }}>
+            <TouchableOpacity 
+              style={[styles.logoutButton, { backgroundColor: Colors.light.primary, borderColor: Colors.light.primary, marginTop: 0 }]} 
+              onPress={() => router.push('/(auth)/login')}
+            >
+              <Text style={[styles.logoutText, { color: '#fff' }]}>Login / Register</Text>
+            </TouchableOpacity>
+          </View>
+        ) : (
+          <>
+            {/* Stats Row */}
+            <View style={styles.statsRow}>
+              <StatItem label="Points" value="1,240" />
+              <StatItem label="Rewards" value="3" />
+              <StatItem label="Saved" value="150k" />
+            </View>
+
+            {/* Menu Sections */}
+            <View style={styles.menuSection}>
+              <Text style={styles.menuTitle}>Financial</Text>
+              <MenuItem icon={<CreditCard size={22} color="#006CFF" />} label="Payment Methods" />
+              <MenuItem icon={<Gift size={22} color="#FF6B00" />} label="Rewards & Offers" />
+            </View>
+          </>
+        )}
 
         {/* Menu Sections */}
         <View style={styles.menuSection}>
@@ -78,10 +107,12 @@ export default function AccountScreen() {
         </View>
 
         {/* Logout */}
-        <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
-          <LogOut size={22} color={Colors.light.error} />
-          <Text style={styles.logoutText}>Log Out</Text>
-        </TouchableOpacity>
+        {isAuth && (
+          <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
+            <LogOut size={22} color={Colors.light.error} />
+            <Text style={styles.logoutText}>Log Out</Text>
+          </TouchableOpacity>
+        )}
 
         <View style={styles.versionContainer}>
           <Text style={styles.versionText}>Version 1.0.24 (2024)</Text>

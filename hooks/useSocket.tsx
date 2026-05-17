@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { io, Socket } from 'socket.io-client';
-import { IP_ADDRESS } from '@/services/api';
+import { IP_ADDRESS, GATEWAY_URL } from '@/services/api';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -10,11 +10,11 @@ interface SocketContextType {
   setUnreadCount: (count: number) => void;
 }
 
-const SocketContext = createContext<SocketContextType>({ 
-  socket: null, 
-  isConnected: false, 
+const SocketContext = createContext<SocketContextType>({
+  socket: null,
+  isConnected: false,
   unreadCount: 0,
-  setUnreadCount: () => {}
+  setUnreadCount: () => { }
 });
 
 export const useSocket = () => useContext(SocketContext);
@@ -25,7 +25,9 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    const newSocket = io(`http://${IP_ADDRESS}:8092`, {
+    // Connect directly to WebSocket Gateway on port 8089
+    const SOCKET_URL = `http://${IP_ADDRESS}:8089`;
+    const newSocket = io(SOCKET_URL, {
       query: { userId },
       transports: ['websocket'],
     });
