@@ -32,7 +32,7 @@ export default function ReviewScreen() {
       await api.post('/api/reviews', reviewData);
       
       Alert.alert('Thành công', 'Cảm ơn bạn đã để lại đánh giá!');
-      router.back();
+      router.replace('/(tabs)');
     } catch (error) {
       console.error('Failed to submit review:', error);
       Alert.alert('Lỗi', 'Không thể gửi đánh giá lúc này. Vui lòng thử lại sau.');

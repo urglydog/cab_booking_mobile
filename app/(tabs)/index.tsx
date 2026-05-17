@@ -10,28 +10,40 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function HomeScreen() {
   const router = useRouter();
-  const { socket, setUnreadCount } = useSocket();
+  const { socket, unreadCount, setUnreadCount } = useSocket();
   const [latestNotification, setLatestNotification] = React.useState('Welcome to CAB Booking! Book your first ride now.');
+  const [recentBookings, setRecentBookings] = React.useState<any[]>([]);
 
-  const fetchLatestNotification = async () => {
+  const fetchDashboardData = async () => {
     try {
       const userId = await AsyncStorage.getItem('user_id');
       if (!userId) return;
+
+      // Fetch Notifications
+      api.get(`/api/notifications/user/${userId}?page=0&size=1`).then(response => {
+        const content = response.data?.content || response.data?.result?.content;
+        if (content && content.length > 0) {
+          setLatestNotification(content[0].message);
+          const unread = content.filter((n: any) => n.status !== 'READ' && !n.isRead).length;
+          if (unread > 0) setUnreadCount(unread);
+        }
+      }).catch(err => console.log('Failed to fetch notifications:', err));
+
+      // Fetch Recent Bookings
+      api.get(`/api/v1/bookings/customer/${userId}?page=0&size=5`).then(response => {
+        if (response.data && response.data.result) {
+          setRecentBookings(response.data.result.content || []);
+        }
+      }).catch(err => console.log('Failed to fetch recent bookings:', err));
       
-      const response = await api.get(`/api/notifications/user/${userId}?page=0&size=1`);
-      const content = response.data?.content || response.data?.result?.content;
-      
-      if (content && content.length > 0) {
-        setLatestNotification(content[0].message);
-      }
     } catch (error) {
-      console.log('Failed to fetch notifications:', error);
+      console.log('Dashboard fetch error:', error);
     }
   };
 
   React.useEffect(() => {
-    fetchLatestNotification();
-    
+    fetchDashboardData();
+
     if (socket) {
       socket.on('new_notification', (data: any) => {
         setLatestNotification(data.message || 'New update for your ride!');
@@ -49,15 +61,15 @@ export default function HomeScreen() {
         <View style={styles.header}>
           <View style={styles.searchContainer}>
             <Search size={20} color={Colors.light.icon} style={styles.searchIcon} />
-            <TextInput 
-              placeholder="Where to?" 
+            <TextInput
+              placeholder="Where to?"
               style={styles.searchInput}
               placeholderTextColor={Colors.light.icon}
               onFocus={() => router.push('/booking')}
             />
           </View>
-          <TouchableOpacity 
-            style={styles.iconButton} 
+          <TouchableOpacity
+            style={styles.iconButton}
             onPress={() => {
               setUnreadCount(0);
               router.push('/modal');
@@ -65,24 +77,18 @@ export default function HomeScreen() {
           >
             <View>
               <Bell size={24} color={Colors.light.text} />
+              {unreadCount > 0 && <View style={styles.badge} />}
             </View>
           </TouchableOpacity>
         </View>
 
         {/* Services Grid */}
-        <View style={styles.servicesGrid}>
-          <ServiceItem 
-            icon={<Car size={32} color={Colors.light.primary} />} 
-            label="Ride" 
-            onPress={() => router.push('/booking')}
+        <View style={[styles.servicesGrid, { justifyContent: 'flex-start' }]}>
+          <ServiceItem
+            icon={<Car size={32} color={Colors.light.primary} />}
+            label="Đặt xe"
+            onPress={() => router.push('/(ride)/booking')}
           />
-          <ServiceItem 
-            icon={<Bike size={32} color={Colors.light.primary} />} 
-            label="Bike" 
-            onPress={() => router.push('/booking')}
-          />
-          <ServiceItem icon={<Utensils size={32} color="#FF6B00" />} label="Food" />
-          <ServiceItem icon={<ShoppingBag size={32} color="#006CFF" />} label="Mart" />
         </View>
 
         {/* Promo Banner Mock */}
@@ -105,15 +111,17 @@ export default function HomeScreen() {
               <Text style={styles.seeAll}>See all</Text>
             </TouchableOpacity>
           </View>
-          
-          <DestinationItem 
-            title="University of Industrial" 
-            subtitle="12 Nguyen Van Bao, Go Vap" 
-          />
-          <DestinationItem 
-            title="Emart Go Vap" 
-            subtitle="366 Phan Van Tri, Ward 5" 
-          />
+
+          {recentBookings.slice(0, 3).map((booking, index) => (
+            <DestinationItem
+              key={booking.id || index}
+              title={booking.dropoffLocation.split(',')[0]} // Show only first part of address
+              subtitle={booking.dropoffLocation}
+            />
+          ))}
+          {recentBookings.length === 0 && (
+            <Text style={{ color: '#999', marginTop: 10 }}>No recent destinations yet.</Text>
+          )}
         </View>
 
         {/* Notifications Section */}
@@ -127,17 +135,23 @@ export default function HomeScreen() {
           </View>
         </View>
 
-        {/* Activity Feed Mock */}
+        {/* Activity Feed */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>Your activity</Text>
-          <View style={styles.activityCard}>
-            <History size={24} color={Colors.light.primary} />
-            <View style={styles.activityInfo}>
-              <Text style={styles.activityTitle}>Ride completed</Text>
-              <Text style={styles.activityTime}>Yesterday, 18:30</Text>
+          {recentBookings.length > 0 ? (
+            <TouchableOpacity onPress={() => router.push('/explore')} style={styles.activityCard}>
+              <History size={24} color={Colors.light.primary} />
+              <View style={styles.activityInfo}>
+                <Text style={styles.activityTitle}>Ride {recentBookings[0].status.toLowerCase()}</Text>
+                <Text style={styles.activityTime}>{new Date(recentBookings[0].createdAt).toLocaleString()}</Text>
+              </View>
+              <Text style={styles.activityPrice}>{recentBookings[0].estimatedFare?.toLocaleString()}đ</Text>
+            </TouchableOpacity>
+          ) : (
+            <View style={[styles.activityCard, { justifyContent: 'center' }]}>
+              <Text style={{ color: '#999' }}>No recent activity</Text>
             </View>
-            <Text style={styles.activityPrice}>65.000đ</Text>
-          </View>
+          )}
         </View>
 
         <View style={{ height: 100 }} />
@@ -204,6 +218,17 @@ const styles = StyleSheet.create({
     height: 40,
     justifyContent: 'center',
     alignItems: 'center',
+  },
+  badge: {
+    position: 'absolute',
+    top: -2,
+    right: -2,
+    backgroundColor: '#EF4444',
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    borderWidth: 2,
+    borderColor: '#fff',
   },
   servicesGrid: {
     flexDirection: 'row',

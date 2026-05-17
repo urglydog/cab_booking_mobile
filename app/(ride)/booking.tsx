@@ -4,6 +4,7 @@ import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Bike, MapPin, Navigation, CreditCard, ChevronLeft } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import api, { GATEWAY_URL, BOOKING_SERVICE_URL } from '@/services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
 
@@ -14,10 +15,57 @@ export default function BookingScreen() {
   const [vehicleType, setVehicleType] = useState('CAR');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [loading, setLoading] = useState(false);
+  const [carPrice, setCarPrice] = useState<number | null>(null);
+  const [bikePrice, setBikePrice] = useState<number | null>(null);
+
+  React.useEffect(() => {
+    const fetchPrices = async () => {
+      try {
+        const [carRes, bikeRes] = await Promise.all([
+          api.get('/api/pricing/estimate', {
+            params: {
+              pickupLat: 10.8231, pickupLng: 106.6631,
+              dropoffLat: 10.8331, dropoffLng: 106.6731,
+              vehicleType: 'CAR'
+            }
+          }),
+          api.get('/api/pricing/estimate', {
+            params: {
+              pickupLat: 10.8231, pickupLng: 106.6631,
+              dropoffLat: 10.8331, dropoffLng: 106.6731,
+              vehicleType: 'BIKE'
+            }
+          })
+        ]);
+        setCarPrice(carRes.data?.totalFare || 55000);
+        setBikePrice(bikeRes.data?.totalFare || 25000);
+      } catch (e) {
+        console.error('Failed to fetch pricing:', e);
+        // Fallback for UI if service is down
+        setCarPrice(55000);
+        setBikePrice(25000);
+      }
+    };
+    fetchPrices();
+  }, []);
 
   const handleBooking = async () => {
     if (!pickup || !dropoff) {
       Alert.alert('Error', 'Please enter both pickup and destination');
+      return;
+    }
+
+    // Check for authentication before booking
+    const token = await AsyncStorage.getItem('access_token');
+    if (!token) {
+      Alert.alert(
+        'Authentication Required',
+        'Please login to book a ride.',
+        [
+          { text: 'Cancel', style: 'cancel' },
+          { text: 'Login', onPress: () => router.push('/login') }
+        ]
+      );
       return;
     }
 
@@ -28,15 +76,15 @@ export default function BookingScreen() {
         dropoffLocation: dropoff,
         vehicleType: vehicleType,
         paymentMethod: paymentMethod,
-        estimatedFare: vehicleType === 'CAR' ? 55000 : 25000,
+        estimatedFare: vehicleType === 'CAR' ? carPrice : bikePrice,
         customerNote: 'Please pick me up at the main gate',
         idempotencyKey: Math.random().toString(36).substring(7)
       };
 
-      console.log('🚀 API POST to:', `${BOOKING_SERVICE_URL}/api/v1/bookings`);
+      console.log('🚀 API POST to:', `${GATEWAY_URL}/api/v1/bookings`);
       console.log('📦 Payload:', JSON.stringify(bookingRequest, null, 2));
       
-      const response = await api.post(`${BOOKING_SERVICE_URL}/api/v1/bookings`, bookingRequest);
+      const response = await api.post(`/api/v1/bookings`, bookingRequest);
       
       console.log('✅ Response Status:', response.status);
       console.log('📄 Response Data:', JSON.stringify(response.data, null, 2));
@@ -132,7 +180,7 @@ export default function BookingScreen() {
               <Car size={32} color={vehicleType === 'CAR' ? '#fff' : '#666'} />
             </View>
             <Text style={styles.vehicleLabel}>CAB Car</Text>
-            <Text style={styles.vehiclePrice}>~55k</Text>
+            <Text style={styles.vehiclePrice}>{carPrice ? `~${(carPrice / 1000).toFixed(0)}k` : '...'}</Text>
           </TouchableOpacity>
 
           <TouchableOpacity 
@@ -143,7 +191,7 @@ export default function BookingScreen() {
               <Bike size={32} color={vehicleType === 'BIKE' ? '#fff' : '#666'} />
             </View>
             <Text style={styles.vehicleLabel}>CAB Bike</Text>
-            <Text style={styles.vehiclePrice}>~25k</Text>
+            <Text style={styles.vehiclePrice}>{bikePrice ? `~${(bikePrice / 1000).toFixed(0)}k` : '...'}</Text>
           </TouchableOpacity>
         </View>
 

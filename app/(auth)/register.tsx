@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import api, { AUTH_SERVICE_URL } from '@/services/api';
+import api, { GATEWAY_URL } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 
 export default function RegisterScreen() {
@@ -21,7 +21,7 @@ export default function RegisterScreen() {
 
     setLoading(true);
     try {
-      const response = await api.post('/auth/register', {
+      const response = await api.post('/api/auth/register', {
         fullName,
         email,
         password,
@@ -30,7 +30,7 @@ export default function RegisterScreen() {
         avatarUrl: 'https://example.com/avatar/default.png',
         deviceId: 'mobile-app',
         platform: 'ANDROID',
-      }, { baseURL: AUTH_SERVICE_URL }); // Go direct to Auth Service
+      }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       if (response.status === 200 || response.status === 201) {
         Alert.alert('Success', 'Registration successful! Please login.', [
@@ -131,7 +131,7 @@ const styles = StyleSheet.create({
   logo: {
     fontSize: 32,
     fontWeight: 'bold',
-    color: '#00B14F',
+    color: '#6366F1',
     marginBottom: 20,
   },
   title: {
@@ -165,7 +165,7 @@ const styles = StyleSheet.create({
   },
   button: {
     height: 55,
-    backgroundColor: '#00B14F',
+    backgroundColor: '#6366F1',
     borderRadius: 12,
     justifyContent: 'center',
     alignItems: 'center',
@@ -188,7 +188,7 @@ const styles = StyleSheet.create({
     fontSize: 14,
   },
   loginHighlight: {
-    color: '#00B14F',
+    color: '#6366F1',
     fontWeight: 'bold',
   }
 });
