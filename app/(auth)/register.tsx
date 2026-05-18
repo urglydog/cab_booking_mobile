@@ -10,12 +10,13 @@ export default function RegisterScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [phoneNumber, setPhoneNumber] = useState('');
+  const [role, setRole] = useState<'USER' | 'DRIVER'>('USER');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
 
   const handleRegister = async () => {
     if (!fullName || !email || !password || !phoneNumber) {
-      Alert.alert('Error', 'Please fill in all fields');
+      Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ thông tin');
       return;
     }
 
@@ -26,21 +27,21 @@ export default function RegisterScreen() {
         email,
         password,
         phoneNumber,
-        role: 'USER',
+        role: role,
         avatarUrl: 'https://example.com/avatar/default.png',
         deviceId: 'mobile-app',
         platform: 'ANDROID',
       }, { baseURL: GATEWAY_URL }); // Go via API Gateway
 
       if (response.status === 200 || response.status === 201) {
-        Alert.alert('Success', 'Registration successful! Please login.', [
+        Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
           { text: 'OK', onPress: () => router.push('/login') }
         ]);
       }
     } catch (error: any) {
       console.error(error);
-      const message = error.response?.data?.message || 'Registration failed. Email might already exist.';
-      Alert.alert('Error', message);
+      const message = error.response?.data?.message || 'Đăng ký thất bại. Email có thể đã tồn tại.';
+      Alert.alert('Lỗi', message);
     } finally {
       setLoading(false);
     }
@@ -96,6 +97,24 @@ export default function RegisterScreen() {
               onChangeText={setPassword}
               secureTextEntry
             />
+          </View>
+
+          <View style={styles.inputContainer}>
+            <Text style={styles.label}>Loại tài khoản</Text>
+            <View style={styles.roleSelectorRow}>
+              <TouchableOpacity
+                style={[styles.roleSelectButton, role === 'USER' && styles.roleActiveButton]}
+                onPress={() => setRole('USER')}
+              >
+                <Text style={[styles.roleSelectText, role === 'USER' && styles.roleActiveText]}>Khách hàng</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[styles.roleSelectButton, role === 'DRIVER' && styles.roleActiveButton]}
+                onPress={() => setRole('DRIVER')}
+              >
+                <Text style={[styles.roleSelectText, role === 'DRIVER' && styles.roleActiveText]}>Tài xế đối tác</Text>
+              </TouchableOpacity>
+            </View>
           </View>
 
           <TouchableOpacity 
@@ -190,5 +209,33 @@ const styles = StyleSheet.create({
   loginHighlight: {
     color: '#6366F1',
     fontWeight: 'bold',
+  },
+  roleSelectorRow: {
+    flexDirection: 'row',
+    gap: 12,
+    marginTop: 4,
+  },
+  roleSelectButton: {
+    flex: 1,
+    height: 48,
+    borderRadius: 12,
+    borderWidth: 1.5,
+    borderColor: '#E2E2E2',
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9F9F9',
+  },
+  roleActiveButton: {
+    borderColor: '#6366F1',
+    backgroundColor: '#EEF2F6',
+  },
+  roleSelectText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#666',
+  },
+  roleActiveText: {
+    color: '#6366F1',
+    fontWeight: '800',
   }
 });

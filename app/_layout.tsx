@@ -18,6 +18,7 @@ export default function RootLayout() {
   const [isReady, setIsReady] = useState(false);
   const [hasToken, setHasToken] = useState(false);
   const [userId, setUserId] = useState<string | null>(null);
+  const [userRole, setUserRole] = useState<string | null>(null);
   const segments = useSegments();
   const router = useRouter();
 
@@ -26,8 +27,10 @@ export default function RootLayout() {
       try {
         const token = await AsyncStorage.getItem('access_token');
         const userIdFromStorage = await AsyncStorage.getItem('user_id');
+        const roleFromStorage = await AsyncStorage.getItem('user_role');
         setUserId(userIdFromStorage);
         setHasToken(!!token);
+        setUserRole(roleFromStorage);
       } catch (e) {
         setHasToken(false);
       } finally {
@@ -40,13 +43,14 @@ export default function RootLayout() {
   useEffect(() => {
     if (!isReady) return;
 
-    const inTabsGroup = segments[0] === '(tabs)';
-
-    // Removed mandatory redirect for tabs to allow guest access
     if (hasToken && segments[0] === '(auth)') {
-      router.replace('/(tabs)');
+      if (userRole === 'ROLE_DRIVER' || userRole === 'DRIVER') {
+        router.replace('/(driver-tabs)');
+      } else {
+        router.replace('/(tabs)');
+      }
     }
-  }, [hasToken, isReady, segments]);
+  }, [hasToken, isReady, segments, userRole]);
 
   if (!isReady) return null;
 
@@ -54,6 +58,7 @@ export default function RootLayout() {
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+        <Stack.Screen name="(driver-tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/register" options={{ headerShown: true, title: 'Register' }} />
         <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
