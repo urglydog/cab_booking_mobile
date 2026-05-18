@@ -34,6 +34,20 @@ export default function LoginScreen() {
       await AsyncStorage.setItem('user_id', user.userId);
       await AsyncStorage.setItem('user_name', user.fullName);
 
+      // Register device FCM token with Notification Service through API Gateway
+      try {
+        const mockFcmToken = 'mock-device-fcm-token-' + user.userId;
+        await api.post('/api/notifications/register-token', null, {
+          params: {
+            userId: user.userId,
+            token: mockFcmToken
+          }
+        });
+        console.log('Successfully synchronized FCM Token:', mockFcmToken);
+      } catch (fcmError) {
+        console.warn('Failed to sync FCM Token with backend:', fcmError);
+      }
+
       Alert.alert('Success', 'Login successful!');
       router.replace('/(tabs)');
     } catch (error: any) {

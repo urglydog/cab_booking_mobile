@@ -1,22 +1,29 @@
 import React from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity, Image } from 'react-native';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, User } from 'lucide-react-native';
+import { Search, UserCircle2 } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 
 const MOCK_MESSAGES = [
   {
     id: '1',
-    name: 'CAB Support',
-    message: 'Your refund for ride #12345 has been processed.',
-    time: '09:41',
+    name: 'Tài xế Nguyễn Chí Thiện',
+    message: 'Tôi đang đến điểm đón, bạn vui lòng đợi chút nhé!',
+    time: '10:45',
     unread: true,
   },
   {
     id: '2',
-    name: 'Driver Nguyen',
-    message: 'I have arrived at the pickup location.',
-    time: 'Yesterday',
+    name: 'Tài xế Trần Quốc Bảo',
+    message: 'Tôi đang đứng ở cổng trường IUH, bạn mặc áo gì thế?',
+    time: 'Hôm qua',
+    unread: false,
+  },
+  {
+    id: '3',
+    name: 'Hỗ trợ CAB Support',
+    message: 'Yêu cầu hỗ trợ của bạn đã được giải quyết.',
+    time: '15/05',
     unread: false,
   },
 ];
@@ -25,25 +32,25 @@ export default function MessagesScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Messages</Text>
+        <Text style={styles.title}>Trò chuyện</Text>
       </View>
 
       <View style={styles.searchContainer}>
         <Search size={20} color={Colors.light.icon} />
-        <Text style={styles.searchPlaceholder}>Search messages...</Text>
+        <Text style={styles.searchPlaceholder}>Tìm kiếm cuộc trò chuyện...</Text>
       </View>
 
       <FlatList
         data={MOCK_MESSAGES}
         keyExtractor={(item) => item.id}
         renderItem={({ item }) => (
-          <TouchableOpacity style={styles.messageItem}>
-            <View style={styles.avatarPlaceholder}>
-              <User size={24} color="#fff" />
+          <TouchableOpacity style={styles.messageItem} activeOpacity={0.7}>
+            <View style={styles.avatarContainer}>
+              <UserCircle2 size={40} color={item.unread ? Colors.light.primary : '#999'} />
             </View>
             <View style={styles.messageContent}>
               <View style={styles.messageHeader}>
-                <Text style={styles.name}>{item.name}</Text>
+                <Text style={[styles.name, item.unread && styles.unreadName]}>{item.name}</Text>
                 <Text style={styles.time}>{item.time}</Text>
               </View>
               <Text numberOfLines={1} style={[styles.message, item.unread && styles.unreadMessage]}>
@@ -93,11 +100,7 @@ const styles = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: '#F2F2F2',
   },
-  avatarPlaceholder: {
-    width: 50,
-    height: 50,
-    borderRadius: 25,
-    backgroundColor: '#CCC',
+  avatarContainer: {
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -112,7 +115,11 @@ const styles = StyleSheet.create({
   },
   name: {
     fontSize: 16,
+    color: '#333',
+  },
+  unreadName: {
     fontWeight: 'bold',
+    color: '#000',
   },
   time: {
     fontSize: 12,
@@ -123,14 +130,14 @@ const styles = StyleSheet.create({
     color: '#666',
   },
   unreadMessage: {
-    color: '#000',
-    fontWeight: '500',
+    color: '#333',
+    fontWeight: '600',
   },
   unreadDot: {
     width: 8,
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#00B14F',
+    backgroundColor: Colors.light.primary,
     marginLeft: 10,
   }
 });

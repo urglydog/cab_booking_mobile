@@ -25,8 +25,8 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    // Connect directly to WebSocket Gateway on port 8089
-    const SOCKET_URL = `http://${IP_ADDRESS}:8089`;
+    // Connect through API Gateway on port 8080
+    const SOCKET_URL = `http://${IP_ADDRESS}:8080`;
     const newSocket = io(SOCKET_URL, {
       query: { userId },
       transports: ['websocket'],

@@ -16,6 +16,17 @@ export default function MatchingScreen() {
   const [driverInfo, setDriverInfo] = useState<any>(null);
 
   useEffect(() => {
+    if (socket && bookingId) {
+      console.log('Joining room:', bookingId);
+      socket.emit('join_room', bookingId);
+      return () => {
+        console.log('Leaving room:', bookingId);
+        socket.emit('leave_room', bookingId);
+      };
+    }
+  }, [socket, bookingId]);
+
+  useEffect(() => {
     if (socket) {
       const handleNotification = (data: any) => {
         console.log('Matching Screen received notification:', data);

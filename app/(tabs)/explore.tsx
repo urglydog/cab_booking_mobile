@@ -30,7 +30,23 @@ export default function ActivityScreen() {
       console.log('📋 History Data Length:', response.data?.result?.content?.length || 0);
 
       if (response.data && response.data.result) {
-        setBookings(response.data.result.content || []);
+        const fetchedBookings = response.data.result.content || [];
+        
+        // Mock completed matched ride with a professional driver to allow direct testing of reviews
+        const mockCompletedBooking = {
+          id: 'booking-mock-123',
+          customerId: userId,
+          assignedDriverId: 'driver-mock-456',
+          pickupLocation: '12 Nguyễn Văn Bảo, Gò Vấp (Đại học Công nghiệp TP.HCM)',
+          dropoffLocation: 'Dinh Thống Nhất, Quận 1',
+          vehicleType: 'CAR',
+          paymentMethod: 'CASH',
+          estimatedFare: 120000,
+          status: 'COMPLETED',
+          createdAt: new Date().toISOString()
+        };
+
+        setBookings([mockCompletedBooking, ...fetchedBookings]);
       }
     } catch (error) {
       console.error('Failed to fetch bookings:', error);
@@ -49,16 +65,44 @@ export default function ActivityScreen() {
     fetchBookings();
   };
 
+  const getStatusInVietnamese = (status: string) => {
+    switch (status) {
+      case 'COMPLETED': return 'Đã hoàn thành';
+      case 'CANCELLED': return 'Đã hủy';
+      case 'MATCHING': return 'Đang tìm tài xế';
+      case 'ACCEPTED': 
+      case 'ASSIGNED': return 'Tài xế đã nhận';
+      case 'ARRIVING': return 'Tài xế đang đến';
+      case 'STARTED':
+      case 'IN_PROGRESS': return 'Đang di chuyển';
+      default: return status;
+    }
+  };
+
+  const getStatusColor = (status: string) => {
+    switch (status) {
+      case 'COMPLETED': return '#00B14F';
+      case 'CANCELLED': return '#EF4444';
+      default: return '#6366F1';
+    }
+  };
+
   const renderItem = ({ item }) => (
-    <TouchableOpacity style={styles.activityItem} onPress={() => alert('Booking Detail ID: ' + item.id)}>
+    <TouchableOpacity 
+      style={styles.activityItem} 
+      onPress={() => router.push({
+        pathname: '/(ride)/detail',
+        params: { bookingId: item.id }
+      })}
+    >
       <View style={styles.iconContainer}>
         {item.vehicleType === 'BIKE' ? <Bike size={24} color="#666" /> : <Car size={24} color="#666" />}
       </View>
       <View style={styles.activityInfo}>
         <Text style={styles.destination} numberOfLines={1}>{item.dropoffLocation}</Text>
-        <Text style={styles.dateTime}>{new Date(item.createdAt).toLocaleString()}</Text>
-        <Text style={[styles.status, { color: item.status === 'COMPLETED' ? '#00B14F' : '#666' }]}>
-          {item.status}
+        <Text style={styles.dateTime}>{new Date(item.createdAt).toLocaleString('vi-VN')}</Text>
+        <Text style={[styles.status, { color: getStatusColor(item.status) }]}>
+          {getStatusInVietnamese(item.status)}
         </Text>
       </View>
       <View style={styles.priceContainer}>
@@ -69,7 +113,7 @@ export default function ActivityScreen() {
               style={styles.rateButton}
               onPress={() => router.push({
                 pathname: '/review',
-                params: { rideId: item.id, driverId: item.driverId }
+                params: { rideId: item.id, driverId: item.assignedDriverId }
               })}
             >
               <Text style={styles.rateButtonText}>Đánh giá</Text>
@@ -84,7 +128,7 @@ export default function ActivityScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.title}>Activity</Text>
+        <Text style={styles.title}>Hoạt động</Text>
       </View>
 
       {loading ? (
@@ -94,7 +138,7 @@ export default function ActivityScreen() {
       ) : bookings.length === 0 ? (
         <View style={styles.center}>
           <History size={64} color="#CCC" />
-          <Text style={styles.emptyText}>No activities yet</Text>
+          <Text style={styles.emptyText}>Chưa có hoạt động nào</Text>
         </View>
       ) : (
         <FlatList
