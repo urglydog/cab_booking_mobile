@@ -5,7 +5,7 @@ import { ChevronLeft, MapPin, Navigation, Phone, MessageSquare, Star } from 'luc
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import { Colors } from '@/constants/Colors';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+import MapView, { Marker, Polyline } from 'react-native-maps';
 
 export default function MatchingScreen() {
   const router = useRouter();
@@ -14,6 +14,18 @@ export default function MatchingScreen() {
 
   const [status, setStatus] = useState('FINDING'); // FINDING, FOUND, ARRIVING, STARTED, COMPLETED
   const [driverInfo, setDriverInfo] = useState<any>(null);
+
+  // Pre-seeded high-fidelity route coordinates from Gò Vấp (IUH) to District 1 (Notre Dame Cathedral)
+  const routeCoordinates = [
+    { latitude: 10.8220, longitude: 106.6870 }, // 1. 12 Nguyễn Văn Bảo (IUH Entrance)
+    { latitude: 10.8210, longitude: 106.6830 }, // 2. Nguyễn Văn Bảo & Nguyễn Kiệm junction
+    { latitude: 10.8140, longitude: 106.6780 }, // 3. Nguyễn Kiệm (Gia Định Park)
+    { latitude: 10.8030, longitude: 106.6760 }, // 4. Phú Nhuận Intersection (Hoàng Văn Thụ)
+    { latitude: 10.7930, longitude: 106.6810 }, // 5. Trần Huy Liệu & Nam Kỳ Khởi Nghĩa
+    { latitude: 10.7900, longitude: 106.6840 }, // 6. Nam Kỳ Khởi Nghĩa (Cầu Công Lý bridge)
+    { latitude: 10.7850, longitude: 106.6900 }, // 7. Nam Kỳ Khởi Nghĩa & Điện Biên Phủ
+    { latitude: 10.7790, longitude: 106.6990 }  // 8. Nhà thờ Đức Bà, Quận 1 (Notre Dame Cathedral)
+  ];
 
   useEffect(() => {
     if (socket && bookingId) {
@@ -92,25 +104,42 @@ export default function MatchingScreen() {
         <MapView
           style={styles.map}
           initialRegion={{
-            latitude: 10.8231,
-            longitude: 106.6631,
-            latitudeDelta: 0.05,
-            longitudeDelta: 0.05,
+            latitude: 10.800,
+            longitude: 106.690,
+            latitudeDelta: 0.08,
+            longitudeDelta: 0.08,
           }}
         >
           {/* Pickup Marker */}
           <Marker
-            coordinate={{ latitude: 10.8231, longitude: 106.6631 }}
+            coordinate={{ latitude: 10.822, longitude: 106.687 }}
             title="Điểm đón"
             description="12 Nguyễn Văn Bảo, Gò Vấp"
-            pinColor="#6366F1"
+            pinColor="#10B981"
           />
           {/* Destination Marker */}
           <Marker
-            coordinate={{ latitude: 10.8331, longitude: 106.6731 }}
+            coordinate={{ latitude: 10.779, longitude: 106.699 }}
             title="Điểm đến"
-            description="12 Nguyễn Thái Sơn"
-            pinColor="#FF4444"
+            description="Nhà thờ Đức Bà, Quận 1"
+            pinColor="#EF4444"
+          />
+
+          {/* Dynamic Driver Tracking Marker */}
+          {status !== 'FINDING' && (
+            <Marker
+              coordinate={{ latitude: 10.824, longitude: 106.689 }}
+              title="Tài xế của bạn"
+              description="Đang di chuyển..."
+              pinColor="#6366F1"
+            />
+          )}
+
+          {/* Polyline route connector */}
+          <Polyline
+            coordinates={routeCoordinates}
+            strokeColor="#6366F1"
+            strokeWidth={4}
           />
         </MapView>
 

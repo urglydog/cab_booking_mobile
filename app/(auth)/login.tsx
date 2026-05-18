@@ -33,6 +33,7 @@ export default function LoginScreen() {
       await AsyncStorage.setItem('refresh_token', refreshToken);
       await AsyncStorage.setItem('user_id', user.userId);
       await AsyncStorage.setItem('user_name', user.fullName);
+      await AsyncStorage.setItem('user_role', user.role || 'ROLE_USER');
 
       // Register device FCM token with Notification Service through API Gateway
       try {
@@ -48,8 +49,12 @@ export default function LoginScreen() {
         console.warn('Failed to sync FCM Token with backend:', fcmError);
       }
 
-      Alert.alert('Success', 'Login successful!');
-      router.replace('/(tabs)');
+      Alert.alert('Thành công', 'Đăng nhập thành công!');
+      if (user.role === 'ROLE_DRIVER' || user.role === 'DRIVER') {
+        router.replace('/(driver-tabs)');
+      } else {
+        router.replace('/(tabs)');
+      }
     } catch (error: any) {
       console.error(error);
       const message = error.response?.data?.message || 'Login failed. Please check your credentials.';
