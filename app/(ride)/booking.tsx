@@ -120,16 +120,29 @@ export default function BookingScreen() {
           <MapView
             style={styles.map}
             initialRegion={{
-              latitude: 10.8231,
-              longitude: 106.6631,
-              latitudeDelta: 0.02,
-              longitudeDelta: 0.02,
+              latitude: 10.822,
+              longitude: 106.687,
+              latitudeDelta: 0.04,
+              longitudeDelta: 0.04,
             }}
           >
+            {/* Pickup point (IUH) */}
             <Marker
-              coordinate={{ latitude: 10.8231, longitude: 106.6631 }}
-              pinColor="#00B14F"
+              coordinate={{ latitude: 10.822, longitude: 106.687 }}
+              title="Điểm đón khách"
+              description={pickup}
+              pinColor="#10B981"
             />
+
+            {/* Dynamic Destination Marker when typing */}
+            {dropoff.length > 0 && (
+              <Marker
+                coordinate={{ latitude: 10.779, longitude: 106.699 }}
+                title="Điểm đến của bạn"
+                description={dropoff}
+                pinColor="#EF4444"
+              />
+            )}
           </MapView>
         </View>
 
