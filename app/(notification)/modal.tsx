@@ -6,6 +6,39 @@ import api, { NOTIFICATION_SERVICE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
+const translateNotificationMessage = (message: string) => {
+  if (!message) return '';
+  if (message.includes('Your ride has been cancelled') || message.includes('cancelled')) {
+    const reason = message.split('Reason: ')[1] || '';
+    let viReason = reason;
+    if (reason.includes('TIMEOUT_NO_DRIVER_FOUND')) {
+      viReason = 'Không tìm thấy tài xế sau 3 phút';
+    } else if (reason.includes('Not specified') || !reason) {
+      viReason = 'Không xác định';
+    }
+    return `Chuyến đi của bạn đã bị hủy. Lý do: ${viReason}`;
+  }
+  if (message.includes('Finding the nearest driver') || message.includes('finding') || message.includes('tìm tài xế')) {
+    return 'Đang tìm tài xế gần nhất cho bạn...';
+  }
+  if (message.includes('Driver has arrived') || message.includes('arrived') || message.includes('đến điểm đón')) {
+    return 'Tài xế đã đến điểm đón!';
+  }
+  if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
+    return 'Chuyến đi đã hoàn thành. Cảm ơn bạn!';
+  }
+  return message;
+};
+
+const translateNotificationTitle = (title: string) => {
+  if (!title) return '';
+  if (title === 'Ride Update') return 'Cập nhật chuyến đi';
+  if (title === 'Booking Timeout') return 'Hết thời gian tìm kiếm';
+  if (title === 'Payment Successful') return 'Thanh toán thành công';
+  if (title === 'Ride Completed') return 'Chuyến đi hoàn thành';
+  return title;
+};
+
 export default function NotificationsModal() {
   const [notifications, setNotifications] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -47,7 +80,6 @@ export default function NotificationsModal() {
   };
 
   const formatTime = (dateStr: string) => {
-    // If date string doesn't have timezone info, append 'Z' to treat as UTC from backend
     const date = new Date(dateStr.endsWith('Z') ? dateStr : dateStr + 'Z');
     return date.toLocaleString('vi-VN');
   };
@@ -66,8 +98,8 @@ export default function NotificationsModal() {
         <Bell size={20} color={item.read ? '#999' : Colors.light.primary} />
       </View>
       <View style={styles.contentContainer}>
-        <Text style={styles.notifTitle}>{item.title}</Text>
-        <Text style={styles.notifMessage}>{item.message}</Text>
+        <Text style={styles.notifTitle}>{translateNotificationTitle(item.title)}</Text>
+        <Text style={styles.notifMessage}>{translateNotificationMessage(item.message)}</Text>
         <Text style={styles.notifTime}>{formatTime(item.createdAt)}</Text>
       </View>
     </TouchableOpacity>
@@ -79,7 +111,7 @@ export default function NotificationsModal() {
         <TouchableOpacity onPress={() => router.back()}>
           <ChevronLeft size={24} color="#333" />
         </TouchableOpacity>
-        <Text style={styles.title}>Notifications</Text>
+        <Text style={styles.title}>Thông báo</Text>
         <TouchableOpacity onPress={handleMarkAllAsRead}>
           <CheckCheck size={24} color={Colors.light.primary} />
         </TouchableOpacity>
@@ -92,7 +124,7 @@ export default function NotificationsModal() {
       ) : notifications.length === 0 ? (
         <View style={styles.center}>
           <Bell size={64} color="#CCC" />
-          <Text style={styles.emptyText}>No notifications yet</Text>
+          <Text style={styles.emptyText}>Chưa có thông báo nào</Text>
         </View>
       ) : (
         <FlatList

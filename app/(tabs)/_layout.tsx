@@ -25,23 +25,23 @@ export default function TabLayout() {
       <Tabs.Screen
         name="index"
         options={{
-          title: 'Home',
+          title: 'Trang chủ',
           tabBarIcon: ({ color }) => <Home size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="explore"
         options={{
-          title: 'Activity',
+          title: 'Hoạt động',
           tabBarIcon: ({ color }) => <History size={24} color={color} />,
         }}
       />
       <Tabs.Screen
         name="messages"
         options={{
-          title: 'Messages',
+          title: 'Trò chuyện',
           tabBarIcon: ({ color }) => <MessageSquare size={24} color={color} />,
-          tabBarBadge: unreadCount > 0 ? unreadCount : undefined,
+          tabBarBadge: 1,
           tabBarBadgeStyle: {
             backgroundColor: Colors[colorScheme].error,
             fontSize: 10,
@@ -51,7 +51,7 @@ export default function TabLayout() {
       <Tabs.Screen
         name="account"
         options={{
-          title: 'Account',
+          title: 'Tài khoản',
           tabBarIcon: ({ color }) => <User size={24} color={color} />,
         }}
       />

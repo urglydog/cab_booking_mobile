@@ -22,19 +22,19 @@ export default function BookingScreen() {
     const fetchPrices = async () => {
       try {
         const [carRes, bikeRes] = await Promise.all([
-          api.get('/api/pricing/estimate', {
-            params: {
-              pickupLat: 10.8231, pickupLng: 106.6631,
-              dropoffLat: 10.8331, dropoffLng: 106.6731,
-              vehicleType: 'CAR'
-            }
+          api.post('/api/pricing/estimate', {
+            pickupLat: 10.8231,
+            pickupLng: 106.6631,
+            dropoffLat: 10.8331,
+            dropoffLng: 106.6731,
+            vehicleType: 'CAR'
           }),
-          api.get('/api/pricing/estimate', {
-            params: {
-              pickupLat: 10.8231, pickupLng: 106.6631,
-              dropoffLat: 10.8331, dropoffLng: 106.6731,
-              vehicleType: 'BIKE'
-            }
+          api.post('/api/pricing/estimate', {
+            pickupLat: 10.8231,
+            pickupLng: 106.6631,
+            dropoffLat: 10.8331,
+            dropoffLng: 106.6731,
+            vehicleType: 'BIKE'
           })
         ]);
         setCarPrice(carRes.data?.totalFare || 55000);

@@ -3,16 +3,47 @@ import { StyleSheet, View, Text, ScrollView, TextInput, TouchableOpacity, Image 
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Search, Car, Bike, Utensils, ShoppingBag, Bell, Menu, MapPin, ChevronRight, History } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import { useRouter } from 'expo-router';
+import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import api, { IP_ADDRESS } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const translateNotificationMessage = (message: string) => {
+  if (!message) return '';
+  if (message.includes('Your ride has been cancelled') || message.includes('cancelled')) {
+    const reason = message.split('Reason: ')[1] || '';
+    let viReason = reason;
+    if (reason.includes('TIMEOUT_NO_DRIVER_FOUND')) {
+      viReason = 'Không tìm thấy tài xế sau 3 phút';
+    } else if (reason.includes('Not specified') || !reason) {
+      viReason = 'Không xác định';
+    }
+    return `Chuyến đi của bạn đã bị hủy. Lý do: ${viReason}`;
+  }
+  if (message.includes('Finding the nearest driver') || message.includes('finding') || message.includes('tìm tài xế')) {
+    return 'Đang tìm tài xế gần nhất cho bạn...';
+  }
+  if (message.includes('Driver has arrived') || message.includes('arrived') || message.includes('đến điểm đón')) {
+    return 'Tài xế đã đến điểm đón!';
+  }
+  if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
+    return 'Chuyến đi đã hoàn thành. Cảm ơn bạn!';
+  }
+  return message;
+};
+
 export default function HomeScreen() {
   const router = useRouter();
   const { socket, unreadCount, setUnreadCount } = useSocket();
-  const [latestNotification, setLatestNotification] = React.useState('Welcome to CAB Booking! Book your first ride now.');
+  const [latestNotification, setLatestNotification] = React.useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = React.useState<any[]>([]);
+
+  // Automatically refresh when Home tab comes into focus
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchDashboardData();
+    }, [])
+  );
 
   const fetchDashboardData = async () => {
     try {
@@ -23,7 +54,7 @@ export default function HomeScreen() {
       api.get(`/api/notifications/user/${userId}?page=0&size=1`).then(response => {
         const content = response.data?.content || response.data?.result?.content;
         if (content && content.length > 0) {
-          setLatestNotification(content[0].message);
+          setLatestNotification(translateNotificationMessage(content[0].message));
           const unread = content.filter((n: any) => n.status !== 'READ' && !n.isRead).length;
           if (unread > 0) setUnreadCount(unread);
         }
@@ -46,13 +77,27 @@ export default function HomeScreen() {
 
     if (socket) {
       socket.on('new_notification', (data: any) => {
-        setLatestNotification(data.message || 'New update for your ride!');
+        setLatestNotification(translateNotificationMessage(data.message || 'Cập nhật mới cho chuyến đi của bạn!'));
       });
     }
     return () => {
       if (socket) socket.off('new_notification');
     };
   }, [socket]);
+
+  const getStatusInVietnamese = (status: string) => {
+    switch (status) {
+      case 'COMPLETED': return 'đã hoàn thành';
+      case 'CANCELLED': return 'đã hủy';
+      case 'MATCHING': return 'đang tìm tài xế';
+      case 'ACCEPTED':
+      case 'ASSIGNED': return 'đã nhận chuyến';
+      case 'ARRIVING': return 'tài xế đang đến';
+      case 'STARTED':
+      case 'IN_PROGRESS': return 'đang di chuyển';
+      default: return status.toLowerCase();
+    }
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -62,7 +107,7 @@ export default function HomeScreen() {
           <View style={styles.searchContainer}>
             <Search size={20} color={Colors.light.icon} style={styles.searchIcon} />
             <TextInput
-              placeholder="Where to?"
+              placeholder="Bạn muốn đi đâu?"
               style={styles.searchInput}
               placeholderTextColor={Colors.light.icon}
               onFocus={() => router.push('/booking')}
@@ -81,7 +126,7 @@ export default function HomeScreen() {
             </View>
           </TouchableOpacity>
         </View>
-
+ 
         {/* Services Grid */}
         <View style={[styles.servicesGrid, { justifyContent: 'flex-start' }]}>
           <ServiceItem
@@ -90,28 +135,28 @@ export default function HomeScreen() {
             onPress={() => router.push('/(ride)/booking')}
           />
         </View>
-
+ 
         {/* Promo Banner Mock */}
         <View style={styles.promoBanner}>
           <View style={styles.promoTextContainer}>
-            <Text style={styles.promoTitle}>50% OFF your first ride</Text>
-            <Text style={styles.promoSubtitle}>Use code: NEWCAB2024</Text>
+            <Text style={styles.promoTitle}>Giảm 50% cho chuyến đầu</Text>
+            <Text style={styles.promoSubtitle}>Nhập mã: NEWCAB2024</Text>
             <TouchableOpacity style={styles.promoButton}>
-              <Text style={styles.promoButtonText}>Claim Now</Text>
+              <Text style={styles.promoButtonText}>Nhận Ngay</Text>
             </TouchableOpacity>
           </View>
           <View style={styles.promoImagePlaceholder} />
         </View>
-
+ 
         {/* Recent Destinations */}
         <View style={styles.section}>
           <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Recent destinations</Text>
+            <Text style={styles.sectionTitle}>Điểm đến gần đây</Text>
             <TouchableOpacity>
-              <Text style={styles.seeAll}>See all</Text>
+              <Text style={styles.seeAll}>Xem tất cả</Text>
             </TouchableOpacity>
           </View>
-
+ 
           {recentBookings.slice(0, 3).map((booking, index) => (
             <DestinationItem
               key={booking.id || index}
@@ -120,13 +165,13 @@ export default function HomeScreen() {
             />
           ))}
           {recentBookings.length === 0 && (
-            <Text style={{ color: '#999', marginTop: 10 }}>No recent destinations yet.</Text>
+            <Text style={{ color: '#999', marginTop: 10 }}>Chưa có điểm đến gần đây.</Text>
           )}
         </View>
-
+ 
         {/* Notifications Section */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Recent Notifications</Text>
+          <Text style={styles.sectionTitle}>Thông báo gần đây</Text>
           <View style={styles.notificationCard}>
             <Bell size={20} color={Colors.light.primary} />
             <Text style={styles.notificationText}>
@@ -134,22 +179,22 @@ export default function HomeScreen() {
             </Text>
           </View>
         </View>
-
+ 
         {/* Activity Feed */}
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Your activity</Text>
+          <Text style={styles.sectionTitle}>Hoạt động của bạn</Text>
           {recentBookings.length > 0 ? (
             <TouchableOpacity onPress={() => router.push('/explore')} style={styles.activityCard}>
               <History size={24} color={Colors.light.primary} />
               <View style={styles.activityInfo}>
-                <Text style={styles.activityTitle}>Ride {recentBookings[0].status.toLowerCase()}</Text>
-                <Text style={styles.activityTime}>{new Date(recentBookings[0].createdAt).toLocaleString()}</Text>
+                <Text style={styles.activityTitle}>Chuyến đi {getStatusInVietnamese(recentBookings[0].status)}</Text>
+                <Text style={styles.activityTime}>{new Date(recentBookings[0].createdAt).toLocaleString('vi-VN')}</Text>
               </View>
               <Text style={styles.activityPrice}>{recentBookings[0].estimatedFare?.toLocaleString()}đ</Text>
             </TouchableOpacity>
           ) : (
             <View style={[styles.activityCard, { justifyContent: 'center' }]}>
-              <Text style={{ color: '#999' }}>No recent activity</Text>
+              <Text style={{ color: '#999' }}>Chưa có hoạt động nào gần đây</Text>
             </View>
           )}
         </View>
