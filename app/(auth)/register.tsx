@@ -34,8 +34,8 @@ export default function RegisterScreen() {
       }, { baseURL: BASE_URL });
 
       if (response.status === 200 || response.status === 201) {
-        Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
-          { text: 'OK', onPress: () => router.push('/login') }
+        Alert.alert('Thành công', 'Đăng ký thành công! Vui lòng đăng nhập.', [
+          { text: 'OK', onPress: () => router.replace({ pathname: '/login', params: { prefillEmail: email } }) }
         ]);
       }
     } catch (error: any) {

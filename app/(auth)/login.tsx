@@ -1,13 +1,14 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import api, { BASE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 
 export default function LoginScreen() {
-  const [email, setEmail] = useState('');
+  const { prefillEmail } = useLocalSearchParams<{ prefillEmail?: string }>();
+  const [email, setEmail] = useState(prefillEmail ?? '');
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const router = useRouter();
@@ -33,6 +34,7 @@ export default function LoginScreen() {
       await AsyncStorage.setItem('refresh_token', refreshToken);
       await AsyncStorage.setItem('user_id', user.userId);
       await AsyncStorage.setItem('user_name', user.fullName);
+      await AsyncStorage.setItem('user_email', email);
       await AsyncStorage.setItem('user_role', user.role || 'ROLE_USER');
 
       // Register device FCM token with Notification Service through API Gateway
@@ -50,11 +52,7 @@ export default function LoginScreen() {
       }
 
       Alert.alert('Thành công', 'Đăng nhập thành công!');
-      if (user.role === 'ROLE_DRIVER' || user.role === 'DRIVER') {
-        router.replace('/(driver-tabs)');
-      } else {
-        router.replace('/(tabs)');
-      }
+      router.replace('/(tabs)');
     } catch (error: any) {
       console.error(error);
       const message = error.response?.data?.message || 'Login failed. Please check your credentials.';

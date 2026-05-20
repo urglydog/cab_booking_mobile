@@ -134,6 +134,11 @@ export default function HomeScreen() {
             label="Đặt xe"
             onPress={() => router.push('/(ride)/booking')}
           />
+          <ServiceItem
+            icon={<Text style={{ fontSize: 30 }}>🤖</Text>}
+            label="Hỏi AI"
+            onPress={() => router.push('/(ai)/chat')}
+          />
         </View>
  
         {/* Promo Banner Mock */}

@@ -40,11 +40,7 @@ export default function MatchingScreen() {
     const fetchBookingInfo = async () => {
       if (!bookingId) return;
       try {
-        let response = await api.get(`/booking/api/v1/bookings/${bookingId}`);
-        
-        if (response.status === 404) {
-          response = await api.get(`/api/v1/bookings/${bookingId}`);
-        }
+        const response = await api.get(`/api/v1/bookings/${bookingId}`);
         
         if (response.data?.result) {
           const status = response.data.result.status;
@@ -135,16 +131,11 @@ export default function MatchingScreen() {
 
     // CASH: skip online payment
     if (paymentMethod === 'CASH') {
-      try {
-        await api.post(`/booking/api/v1/bookings/${bookingId}/complete`, {
-          paymentStatus: 'SUCCESS',
-          paymentMethod: 'CASH'
-        });
-      } catch (e) {
-        console.log('Could not confirm cash payment:', e);
-      }
       setBookingStatus('PAID');
-      router.replace('/(tabs)/explore');
+      router.replace({
+        pathname: '/(review)/review',
+        params: { rideId: bookingId as string, driverId: booking.driverId || 'driver-mock-123' },
+      });
       return;
     }
 
@@ -320,7 +311,7 @@ export default function MatchingScreen() {
                 style={styles.cancelButton}
                 onPress={async () => {
                   try {
-                    await api.post(`/booking/api/v1/bookings/${bookingId}/cancel`);
+                    await api.post(`/api/v1/bookings/${bookingId}/cancel`);
                     router.replace('/(tabs)/explore');
                   } catch (e) {
                     Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
