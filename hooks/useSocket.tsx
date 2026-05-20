@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { io, Socket } from 'socket.io-client';
-import { BASE_URL } from '@/services/api';
+import { SOCKET_URL } from '@/services/api';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -25,7 +25,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    const newSocket = io(BASE_URL, {
+    const newSocket = io(SOCKET_URL, {
       query: { userId },
       transports: ['websocket'],
     });

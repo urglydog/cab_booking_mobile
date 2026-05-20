@@ -105,15 +105,10 @@ export default function RootLayout() {
 
   useEffect(() => {
     if (!isReady) return;
-
     if (hasToken && segments[0] === '(auth)') {
-      if (userRole === 'ROLE_DRIVER' || userRole === 'DRIVER') {
-        router.replace('/(driver-tabs)');
-      } else {
-        router.replace('/(tabs)');
-      }
+      router.replace('/(tabs)');
     }
-  }, [hasToken, isReady, segments, userRole]);
+  }, [hasToken, isReady, segments]);
 
   if (!isReady) return null;
 
@@ -122,9 +117,8 @@ export default function RootLayout() {
       <DeepLinkHandler />
       <Stack>
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(driver-tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)/register" options={{ headerShown: true, title: 'Register' }} />
+        <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/matching" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/detail" options={{ headerShown: false }} />
@@ -133,6 +127,7 @@ export default function RootLayout() {
         <Stack.Screen name="(payment)/payment-success" options={{ headerShown: false }} />
         <Stack.Screen name="(payment)/payment-failed" options={{ headerShown: false }} />
         <Stack.Screen name="(notification)/modal" options={{ presentation: 'modal', title: 'Notifications' }} />
+        <Stack.Screen name="(ai)/chat" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
     </ThemeProvider>
