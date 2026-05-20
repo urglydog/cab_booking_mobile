@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert, ScrollView } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import api, { GATEWAY_URL } from '@/services/api';
+import api, { BASE_URL } from '@/services/api';
 import { Colors } from '@/constants/Colors';
 
 export default function RegisterScreen() {
@@ -31,11 +31,11 @@ export default function RegisterScreen() {
         avatarUrl: 'https://example.com/avatar/default.png',
         deviceId: 'mobile-app',
         platform: 'ANDROID',
-      }, { baseURL: GATEWAY_URL }); // Go via API Gateway
+      }, { baseURL: BASE_URL });
 
       if (response.status === 200 || response.status === 201) {
-        Alert.alert('Thành công', 'Đăng ký tài khoản thành công! Vui lòng đăng nhập.', [
-          { text: 'OK', onPress: () => router.push('/login') }
+        Alert.alert('Thành công', 'Đăng ký thành công! Vui lòng đăng nhập.', [
+          { text: 'OK', onPress: () => router.replace({ pathname: '/login', params: { prefillEmail: email } }) }
         ]);
       }
     } catch (error: any) {

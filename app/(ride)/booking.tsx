@@ -1,12 +1,18 @@
 import React, { useState } from 'react';
 import { StyleSheet, View, Text, ScrollView, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Car, Bike, MapPin, Navigation, CreditCard, ChevronLeft } from 'lucide-react-native';
+import { Car, Bike, MapPin, Navigation, CreditCard, ChevronLeft, Gift } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { GATEWAY_URL, BOOKING_SERVICE_URL } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
+
+const PROMO_CODES = [
+  { id: 'promo-1', code: 'CABNEW', title: 'Mừng bạn mới', discount: 30000, description: 'Giảm trực tiếp 30k' },
+  { id: 'promo-2', code: 'CABSUMMER', title: 'CAB Ngày nắng', discount: 15000, description: 'Giảm trực tiếp 15k' },
+  { id: 'promo-3', code: 'CABVIP', title: 'CAB Tri ân VIP', discount: 50000, description: 'Giảm trực tiếp 50k' }
+];
 
 export default function BookingScreen() {
   const router = useRouter();
@@ -17,6 +23,16 @@ export default function BookingScreen() {
   const [loading, setLoading] = useState(false);
   const [carPrice, setCarPrice] = useState<number | null>(null);
   const [bikePrice, setBikePrice] = useState<number | null>(null);
+  const [selectedPromo, setSelectedPromo] = useState<any>(null);
+
+  // Map selected vehicle type to API value
+  const getVehicleTypeForApi = (type: string) => {
+    switch (type) {
+      case 'CAR': return 'CAR4';
+      case 'BIKE': return 'BIKE';
+      default: return 'CAR4';
+    }
+  };
 
   React.useEffect(() => {
     const fetchPrices = async () => {
@@ -27,21 +43,20 @@ export default function BookingScreen() {
             pickupLng: 106.6631,
             dropoffLat: 10.8331,
             dropoffLng: 106.6731,
-            vehicleType: 'CAR'
+            vehicleType: 'ECONOMY'
           }),
           api.post('/api/pricing/estimate', {
             pickupLat: 10.8231,
             pickupLng: 106.6631,
             dropoffLat: 10.8331,
             dropoffLng: 106.6731,
-            vehicleType: 'BIKE'
+            vehicleType: 'ECONOMY'
           })
         ]);
         setCarPrice(carRes.data?.totalFare || 55000);
         setBikePrice(bikeRes.data?.totalFare || 25000);
       } catch (e) {
         console.error('Failed to fetch pricing:', e);
-        // Fallback for UI if service is down
         setCarPrice(55000);
         setBikePrice(25000);
       }
@@ -55,7 +70,6 @@ export default function BookingScreen() {
       return;
     }
 
-    // Check for authentication before booking
     const token = await AsyncStorage.getItem('access_token');
     if (!token) {
       Alert.alert(
@@ -71,35 +85,69 @@ export default function BookingScreen() {
 
     setLoading(true);
     try {
+      // Get user info from storage
+      const customerId = await AsyncStorage.getItem('user_id') || '';
+
+      // Generate idempotency key per API guide
+      const idempotencyKey = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
+      const baseFare = vehicleType === 'CAR' ? carPrice : bikePrice;
+      const discount = selectedPromo ? selectedPromo.discount : 0;
+      const finalFare = Math.max(0, (baseFare || 0) - discount);
+
       const bookingRequest = {
+        customerId,
         pickupLocation: pickup,
         dropoffLocation: dropoff,
-        vehicleType: vehicleType,
-        paymentMethod: paymentMethod,
-        estimatedFare: vehicleType === 'CAR' ? carPrice : bikePrice,
-        customerNote: 'Please pick me up at the main gate',
-        idempotencyKey: Math.random().toString(36).substring(7)
+        pickupLat: 10.8231,
+        pickupLng: 106.6631,
+        dropoffLat: 10.8331,
+        dropoffLng: 106.6731,
+        vehicleType: getVehicleTypeForApi(vehicleType),
+        paymentMethod,
+        estimatedFare: finalFare,
+        customerNote: selectedPromo ? `Áp dụng mã ${selectedPromo.code}` : 'Please pick me up at the main gate',
+        idempotencyKey,
       };
 
-      console.log('🚀 API POST to:', `${GATEWAY_URL}/api/v1/bookings`);
-      console.log('📦 Payload:', JSON.stringify(bookingRequest, null, 2));
-      
+      // Gateway (Config Server): /api/v1/bookings/** → lb://booking-service
       const response = await api.post(`/api/v1/bookings`, bookingRequest);
       
-      console.log('✅ Response Status:', response.status);
-      console.log('📄 Response Data:', JSON.stringify(response.data, null, 2));
+      console.log('✅ Booking Response Status:', response.status);
+      console.log('📄 Booking Response Data:', JSON.stringify(response.data, null, 2));
 
-      if (response.status === 200 || response.status === 201) {
+      // Handle response: { code, message, result } OR plain 2xx
+      const isSuccess = response.data?.code === 200 || response.data?.code === 201
+        || (response.status >= 200 && response.status < 300 && response.data?.result);
+      if (isSuccess) {
         const bookingId = response.data?.result?.id || response.data?.id;
         router.replace({
           pathname: '/matching',
           params: { bookingId: bookingId }
         });
+      } else {
+        const errorMsg = response.data?.errorMessage || response.data?.message || 'Failed to create booking';
+        Alert.alert('Booking Error', errorMsg);
       }
     } catch (error: any) {
       console.error('Booking Error:', error);
-      const errorMsg = error.response?.data?.message || 'Failed to book ride. Please check booking-service logs.';
-      Alert.alert('Booking Failed', errorMsg);
+      
+      // Handle different error types
+      if (error.response?.status === 409) {
+        // Idempotency key conflict - booking might already exist
+        const existingBookingId = error.response?.data?.result?.id;
+        if (existingBookingId) {
+          router.replace({
+            pathname: '/matching',
+            params: { bookingId: existingBookingId }
+          });
+          return;
+        }
+        Alert.alert('Booking Conflict', 'This booking request was already processed. Please try a different route.');
+      } else {
+        const errorMsg = error.response?.data?.message || error.response?.data?.errorMessage || 'Failed to book ride. Please check booking-service logs.';
+        Alert.alert('Booking Failed', errorMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -238,7 +286,73 @@ export default function BookingScreen() {
             </View>
             <Text style={[styles.paymentLabel, paymentMethod === 'ZALOPAY' && styles.activePaymentText]}>ZaloPay</Text>
           </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.paymentItem, paymentMethod === 'VNPAY' && styles.activePayment]}
+            onPress={() => setPaymentMethod('VNPAY')}
+          >
+            <View style={[styles.paymentLogo, { backgroundColor: '#AA2B52' }]}>
+              <Text style={[styles.logoText, { fontSize: 10 }]}>V</Text>
+            </View>
+            <Text style={[styles.paymentLabel, paymentMethod === 'VNPAY' && styles.activePaymentText]}>VNPay</Text>
+          </TouchableOpacity>
         </ScrollView>
+
+        {/* Promo Code Selection */}
+        <Text style={styles.sectionTitle}>Chọn khuyến mãi 🎁</Text>
+        <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.promoList}>
+          {PROMO_CODES.map((promo) => {
+            const isSelected = selectedPromo?.id === promo.id;
+            return (
+              <TouchableOpacity
+                key={promo.id}
+                style={[styles.promoItem, isSelected && styles.activePromo]}
+                onPress={() => setSelectedPromo(isSelected ? null : promo)}
+              >
+                <View style={[styles.promoIconContainer, isSelected && styles.activePromoIcon]}>
+                  <Gift size={20} color={isSelected ? '#fff' : '#6366F1'} />
+                </View>
+                <View style={{ flex: 1 }}>
+                  <Text style={[styles.promoCodeText, isSelected && styles.activePromoText]}>{promo.code}</Text>
+                  <Text style={styles.promoTitleText} numberOfLines={1}>{promo.title}</Text>
+                  <Text style={styles.promoDescText} numberOfLines={1}>{promo.description}</Text>
+                </View>
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+
+        {/* Fare Summary */}
+        <View style={styles.fareSummaryCard}>
+          <View style={styles.fareRow}>
+            <Text style={styles.fareLabel}>Giá gốc:</Text>
+            <Text style={styles.fareValue}>
+              {vehicleType === 'CAR' 
+                ? (carPrice ? `${carPrice.toLocaleString()}đ` : '...')
+                : (bikePrice ? `${bikePrice.toLocaleString()}đ` : '...')
+              }
+            </Text>
+          </View>
+          {selectedPromo && (
+            <View style={styles.fareRow}>
+              <Text style={[styles.fareLabel, { color: '#10B981' }]}>Khuyến mãi ({selectedPromo.code}):</Text>
+              <Text style={[styles.fareValue, { color: '#10B981', fontWeight: '600' }]}>
+                -{selectedPromo.discount.toLocaleString()}đ
+              </Text>
+            </View>
+          )}
+          <View style={styles.fareDivider} />
+          <View style={styles.fareRow}>
+            <Text style={[styles.fareLabel, { fontWeight: 'bold', fontSize: 15, color: '#1F2937' }]}>Tổng thanh toán:</Text>
+            <Text style={[styles.fareValue, { fontWeight: 'bold', fontSize: 17, color: '#6366F1' }]}>
+              {(() => {
+                const baseFare = vehicleType === 'CAR' ? carPrice : bikePrice;
+                const discount = selectedPromo ? selectedPromo.discount : 0;
+                return `${Math.max(0, (baseFare || 0) - discount).toLocaleString()}đ`;
+              })()}
+            </Text>
+          </View>
+        </View>
 
         {/* Book Button */}
         <TouchableOpacity 
@@ -250,7 +364,7 @@ export default function BookingScreen() {
             <ActivityIndicator color="#fff" />
           ) : (
             <>
-              <Text style={styles.bookButtonText}>CONFIRM {vehicleType}</Text>
+              <Text style={styles.bookButtonText}>CONFIRM {vehicleType === 'CAR' ? 'CAR' : 'BIKE'}</Text>
               <Navigation size={20} color="#fff" />
             </>
           )}
@@ -487,5 +601,94 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontSize: 18,
     fontWeight: 'bold',
-  }
+  },
+  promoList: {
+    marginBottom: 20,
+    flexDirection: 'row',
+    paddingHorizontal: 20,
+  },
+  promoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#fff',
+    paddingHorizontal: 15,
+    paddingVertical: 12,
+    borderRadius: 16,
+    marginRight: 12,
+    borderWidth: 2,
+    borderColor: 'transparent',
+    gap: 12,
+    width: 210,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  activePromo: {
+    borderColor: '#6366F1',
+    backgroundColor: '#EEF2FF',
+  },
+  promoIconContainer: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: '#EEF2FF',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  activePromoIcon: {
+    backgroundColor: '#6366F1',
+  },
+  promoCodeText: {
+    fontSize: 14,
+    fontWeight: 'bold',
+    color: '#6366F1',
+  },
+  activePromoText: {
+    color: '#6366F1',
+  },
+  promoTitleText: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#1F2937',
+    marginTop: 2,
+  },
+  promoDescText: {
+    fontSize: 10,
+    color: '#9CA3AF',
+    marginTop: 1,
+  },
+  fareSummaryCard: {
+    marginHorizontal: 20,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 5,
+    elevation: 2,
+  },
+  fareRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  fareLabel: {
+    fontSize: 14,
+    color: '#6B7280',
+  },
+  fareValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#1F2937',
+  },
+  fareDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 8,
+  },
 });

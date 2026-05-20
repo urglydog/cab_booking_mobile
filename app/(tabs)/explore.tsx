@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, FlatList, TouchableOpacity, RefreshControl, Act
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Bike, ChevronRight, History } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { BOOKING_SERVICE_URL } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
@@ -22,9 +22,7 @@ export default function ActivityScreen() {
         return;
       }
       
-      console.log('🔍 Fetching History from:', `${BOOKING_SERVICE_URL}/api/v1/bookings/customer/${userId}?page=0&size=20`);
-      
-      const response = await api.get(`${BOOKING_SERVICE_URL}/api/v1/bookings/customer/${userId}?page=0&size=20`);
+      const response = await api.get(`/api/v1/bookings/customer/${userId}?page=0&size=20`);
       
       console.log('📥 History Response:', response.status);
       console.log('📋 History Data Length:', response.data?.result?.content?.length || 0);
@@ -32,21 +30,18 @@ export default function ActivityScreen() {
       if (response.data && response.data.result) {
         const fetchedBookings = response.data.result.content || [];
         
-        // Mock completed matched ride with a professional driver to allow direct testing of reviews
-        const mockCompletedBooking = {
-          id: 'booking-mock-123',
-          customerId: userId,
+        const mockCompleted = {
+          id: 'mock-completed-for-review',
           assignedDriverId: 'driver-mock-456',
-          pickupLocation: '12 Nguyễn Văn Bảo, Gò Vấp (Đại học Công nghiệp TP.HCM)',
-          dropoffLocation: 'Dinh Thống Nhất, Quận 1',
-          vehicleType: 'CAR',
+          pickupLocation: 'Trường ĐH Công nghiệp TP.HCM, Gò Vấp',
+          dropoffLocation: 'Sân bay Tân Sơn Nhất',
+          vehicleType: 'CAR4',
           paymentMethod: 'CASH',
-          estimatedFare: 120000,
+          estimatedFare: 85000,
           status: 'COMPLETED',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
         };
-
-        setBookings([mockCompletedBooking, ...fetchedBookings]);
+        setBookings([mockCompleted, ...fetchedBookings]);
       }
     } catch (error) {
       console.error('Failed to fetch bookings:', error);
@@ -112,8 +107,8 @@ export default function ActivityScreen() {
             <TouchableOpacity 
               style={styles.rateButton}
               onPress={() => router.push({
-                pathname: '/review',
-                params: { rideId: item.id, driverId: item.assignedDriverId }
+                pathname: '/(review)/review',
+                params: { rideId: item.id, driverId: item.assignedDriverId || 'driver-mock-456' }
               })}
             >
               <Text style={styles.rateButtonText}>Đánh giá</Text>

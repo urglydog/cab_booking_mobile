@@ -5,7 +5,7 @@ import { Search, Car, Bike, Utensils, ShoppingBag, Bell, Menu, MapPin, ChevronRi
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
-import api, { IP_ADDRESS } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const translateNotificationMessage = (message: string) => {
@@ -133,6 +133,11 @@ export default function HomeScreen() {
             icon={<Car size={32} color={Colors.light.primary} />}
             label="Đặt xe"
             onPress={() => router.push('/(ride)/booking')}
+          />
+          <ServiceItem
+            icon={<Text style={{ fontSize: 30 }}>🤖</Text>}
+            label="Hỏi AI"
+            onPress={() => router.push('/(ai)/chat')}
           />
         </View>
  

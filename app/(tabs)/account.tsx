@@ -1,34 +1,48 @@
 import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { User, Settings, CreditCard, Gift, ShieldCheck, HelpCircle, LogOut, ChevronRight, Star } from 'lucide-react-native';
+import { User, Settings, CreditCard, Gift, ShieldCheck, HelpCircle, LogOut, ChevronRight } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import api from '@/services/api';
 
 export default function AccountScreen() {
   const router = useRouter();
   const [userName, setUserName] = useState('Guest User');
+  const [userEmail, setUserEmail] = useState('');
   const [isAuth, setIsAuth] = useState(false);
 
   useEffect(() => {
     const loadUser = async () => {
       const name = await AsyncStorage.getItem('user_name');
       const token = await AsyncStorage.getItem('access_token');
+      const email = await AsyncStorage.getItem('user_email');
       if (name) setUserName(name);
-      if (token) setIsAuth(true);
+      if (email) setUserEmail(email);
+      if (token) {
+        setIsAuth(true);
+        // Fetch live profile from backend
+        try {
+          const res = await api.get('/api/users/me/profile');
+          const profile = res.data?.result || res.data;
+          if (profile?.fullName) setUserName(profile.fullName);
+        } catch (e) {
+          // silently fail — use cached name
+        }
+      }
     };
     loadUser();
   }, []);
 
   const handleLogout = async () => {
     Alert.alert(
-      'Logout',
-      'Are you sure you want to logout?',
+      'Đăng xuất',
+      'Bạn có chắc muốn đăng xuất không?',
       [
-        { text: 'Cancel', style: 'cancel' },
-        { 
-          text: 'Logout', 
+        { text: 'Huỷ', style: 'cancel' },
+        {
+          text: 'Đăng xuất',
           style: 'destructive',
           onPress: async () => {
             await AsyncStorage.clear();
@@ -48,14 +62,11 @@ export default function AccountScreen() {
             <User size={40} color="#fff" />
           </View>
           <View style={styles.profileInfo}>
-            <Text style={styles.profileName}>{isAuth ? userName : 'Welcome to CAB'}</Text>
+            <Text style={styles.profileName}>{isAuth ? userName : 'Chào mừng đến CAB'}</Text>
             {isAuth ? (
-              <View style={styles.ratingContainer}>
-                <Star size={16} color={Colors.light.warning} fill={Colors.light.warning} />
-                <Text style={styles.ratingText}>4.9 • Gold Member</Text>
-              </View>
+              <Text style={styles.emailText}>{userEmail}</Text>
             ) : (
-              <Text style={styles.ratingText}>Please login to continue</Text>
+              <Text style={styles.subtitleText}>Đăng nhập để tiếp tục</Text>
             )}
           </View>
           {isAuth && (
@@ -67,55 +78,38 @@ export default function AccountScreen() {
 
         {!isAuth ? (
           <View style={{ paddingHorizontal: 20, marginTop: 10 }}>
-            <TouchableOpacity 
-              style={[styles.logoutButton, { backgroundColor: Colors.light.primary, borderColor: Colors.light.primary, marginTop: 0 }]} 
+            <TouchableOpacity
+              style={[styles.logoutButton, { backgroundColor: Colors.light.primary, borderColor: Colors.light.primary, marginTop: 0 }]}
               onPress={() => router.push('/(auth)/login')}
             >
-              <Text style={[styles.logoutText, { color: '#fff' }]}>Login / Register</Text>
+              <Text style={[styles.logoutText, { color: '#fff' }]}>Đăng nhập / Đăng ký</Text>
             </TouchableOpacity>
           </View>
         ) : (
-          <>
-            {/* Stats Row */}
-            <View style={styles.statsRow}>
-              <StatItem label="Points" value="1,240" />
-              <StatItem label="Rewards" value="3" />
-              <StatItem label="Saved" value="150k" />
-            </View>
-
-            {/* Menu Sections */}
-            <View style={styles.menuSection}>
-              <Text style={styles.menuTitle}>Financial</Text>
-              <MenuItem icon={<CreditCard size={22} color="#006CFF" />} label="Payment Methods" />
-              <MenuItem icon={<Gift size={22} color="#FF6B00" />} label="Rewards & Offers" />
-            </View>
-          </>
+          <View style={styles.menuSection}>
+            <Text style={styles.menuTitle}>Tài chính</Text>
+            <MenuItem icon={<CreditCard size={22} color="#006CFF" />} label="Phương thức thanh toán" />
+            <MenuItem icon={<Gift size={22} color="#FF6B00" />} label="Ưu đãi & Khuyến mãi" />
+          </View>
         )}
 
-        {/* Menu Sections */}
         <View style={styles.menuSection}>
-          <Text style={styles.menuTitle}>Financial</Text>
-          <MenuItem icon={<CreditCard size={22} color="#006CFF" />} label="Payment Methods" />
-          <MenuItem icon={<Gift size={22} color="#FF6B00" />} label="Rewards & Offers" />
-        </View>
-
-        <View style={styles.menuSection}>
-          <Text style={styles.menuTitle}>General</Text>
-          <MenuItem icon={<ShieldCheck size={22} color={Colors.light.primary} />} label="Safety & Privacy" />
-          <MenuItem icon={<HelpCircle size={22} color="#666" />} label="Support Center" />
-          <MenuItem icon={<Settings size={22} color="#333" />} label="App Settings" />
+          <Text style={styles.menuTitle}>Hỗ trợ</Text>
+          <MenuItem icon={<ShieldCheck size={22} color={Colors.light.primary} />} label="Bảo mật & Quyền riêng tư" />
+          <MenuItem icon={<HelpCircle size={22} color="#666" />} label="Trung tâm trợ giúp" />
+          <MenuItem icon={<Settings size={22} color="#333" />} label="Cài đặt ứng dụng" />
         </View>
 
         {/* Logout */}
         {isAuth && (
           <TouchableOpacity style={styles.logoutButton} onPress={handleLogout}>
             <LogOut size={22} color={Colors.light.error} />
-            <Text style={styles.logoutText}>Log Out</Text>
+            <Text style={styles.logoutText}>Đăng xuất</Text>
           </TouchableOpacity>
         )}
 
         <View style={styles.versionContainer}>
-          <Text style={styles.versionText}>Version 1.0.24 (2024)</Text>
+          <Text style={styles.versionText}>CAB Booking v1.0.0</Text>
         </View>
 
         <View style={{ height: 50 }} />
@@ -124,18 +118,9 @@ export default function AccountScreen() {
   );
 }
 
-function StatItem({ label, value }: { label: string, value: string }) {
-  return (
-    <View style={styles.statItem}>
-      <Text style={styles.statValue}>{value}</Text>
-      <Text style={styles.statLabel}>{label}</Text>
-    </View>
-  );
-}
-
 function MenuItem({ icon, label }: { icon: React.ReactNode, label: string }) {
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={() => alert('This feature is under development')}>
+    <TouchableOpacity style={styles.menuItem} onPress={() => alert('Tính năng đang phát triển')}>
       <View style={styles.menuIconContainer}>
         {icon}
       </View>
@@ -160,7 +145,7 @@ const styles = StyleSheet.create({
     width: 70,
     height: 70,
     borderRadius: 35,
-    backgroundColor: '#00B14F',
+    backgroundColor: '#6366F1',
     justifyContent: 'center',
     alignItems: 'center',
   },
@@ -169,50 +154,29 @@ const styles = StyleSheet.create({
     marginLeft: 20,
   },
   profileName: {
-    fontSize: 22,
+    fontSize: 20,
     fontWeight: 'bold',
     color: '#111',
   },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    marginTop: 5,
-    gap: 5,
+  emailText: {
+    fontSize: 13,
+    color: '#666',
+    marginTop: 4,
   },
-  ratingText: {
+  subtitleText: {
     fontSize: 14,
     color: '#666',
+    marginTop: 4,
   },
   editButton: {
     padding: 10,
   },
-  statsRow: {
-    flexDirection: 'row',
-    backgroundColor: '#F9F9F9',
-    marginHorizontal: 20,
-    borderRadius: 16,
-    paddingVertical: 20,
-    justifyContent: 'space-around',
-  },
-  statItem: {
-    alignItems: 'center',
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111',
-  },
-  statLabel: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
   menuSection: {
-    marginTop: 30,
+    marginTop: 25,
     paddingHorizontal: 20,
   },
   menuTitle: {
-    fontSize: 14,
+    fontSize: 12,
     fontWeight: 'bold',
     color: '#999',
     textTransform: 'uppercase',
