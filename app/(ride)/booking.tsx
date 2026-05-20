@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, ScrollView, TextInput, TouchableOpacity, Activi
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Bike, MapPin, Navigation, CreditCard, ChevronLeft } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { GATEWAY_URL, BOOKING_SERVICE_URL } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
@@ -18,6 +18,15 @@ export default function BookingScreen() {
   const [carPrice, setCarPrice] = useState<number | null>(null);
   const [bikePrice, setBikePrice] = useState<number | null>(null);
 
+  // Map selected vehicle type to API value
+  const getVehicleTypeForApi = (type: string) => {
+    switch (type) {
+      case 'CAR': return 'STANDARD';
+      case 'BIKE': return 'BIKE';
+      default: return 'STANDARD';
+    }
+  };
+
   React.useEffect(() => {
     const fetchPrices = async () => {
       try {
@@ -27,7 +36,7 @@ export default function BookingScreen() {
             pickupLng: 106.6631,
             dropoffLat: 10.8331,
             dropoffLng: 106.6731,
-            vehicleType: 'CAR'
+            vehicleType: 'STANDARD'
           }),
           api.post('/api/pricing/estimate', {
             pickupLat: 10.8231,
@@ -41,7 +50,6 @@ export default function BookingScreen() {
         setBikePrice(bikeRes.data?.totalFare || 25000);
       } catch (e) {
         console.error('Failed to fetch pricing:', e);
-        // Fallback for UI if service is down
         setCarPrice(55000);
         setBikePrice(25000);
       }
@@ -55,7 +63,6 @@ export default function BookingScreen() {
       return;
     }
 
-    // Check for authentication before booking
     const token = await AsyncStorage.getItem('access_token');
     if (!token) {
       Alert.alert(
@@ -71,35 +78,64 @@ export default function BookingScreen() {
 
     setLoading(true);
     try {
+      // Get user info from storage
+      const customerId = await AsyncStorage.getItem('user_id') || '';
+
+      // Generate idempotency key per API guide
+      const idempotencyKey = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
+
       const bookingRequest = {
+        customerId,
         pickupLocation: pickup,
         dropoffLocation: dropoff,
-        vehicleType: vehicleType,
-        paymentMethod: paymentMethod,
+        pickupLat: 10.8231,
+        pickupLng: 106.6631,
+        dropoffLat: 10.8331,
+        dropoffLng: 106.6731,
+        vehicleType: getVehicleTypeForApi(vehicleType),
+        paymentMethod,
         estimatedFare: vehicleType === 'CAR' ? carPrice : bikePrice,
         customerNote: 'Please pick me up at the main gate',
-        idempotencyKey: Math.random().toString(36).substring(7)
+        idempotencyKey,
       };
 
-      console.log('🚀 API POST to:', `${GATEWAY_URL}/api/v1/bookings`);
-      console.log('📦 Payload:', JSON.stringify(bookingRequest, null, 2));
+      // Use correct endpoint per API guide
+      const response = await api.post(`/booking/api/v1/bookings`, bookingRequest);
       
-      const response = await api.post(`/api/v1/bookings`, bookingRequest);
-      
-      console.log('✅ Response Status:', response.status);
-      console.log('📄 Response Data:', JSON.stringify(response.data, null, 2));
+      console.log('✅ Booking Response Status:', response.status);
+      console.log('📄 Booking Response Data:', JSON.stringify(response.data, null, 2));
 
-      if (response.status === 200 || response.status === 201) {
+      // Handle response per API guide format: { code, message, result }
+      if (response.data?.code === 200 || response.data?.code === 201) {
         const bookingId = response.data?.result?.id || response.data?.id;
         router.replace({
           pathname: '/matching',
           params: { bookingId: bookingId }
         });
+      } else {
+        // Handle booking creation error (e.g., 409 conflict)
+        const errorMsg = response.data?.errorMessage || response.data?.message || 'Failed to create booking';
+        Alert.alert('Booking Error', errorMsg);
       }
     } catch (error: any) {
       console.error('Booking Error:', error);
-      const errorMsg = error.response?.data?.message || 'Failed to book ride. Please check booking-service logs.';
-      Alert.alert('Booking Failed', errorMsg);
+      
+      // Handle different error types
+      if (error.response?.status === 409) {
+        // Idempotency key conflict - booking might already exist
+        const existingBookingId = error.response?.data?.result?.id;
+        if (existingBookingId) {
+          router.replace({
+            pathname: '/matching',
+            params: { bookingId: existingBookingId }
+          });
+          return;
+        }
+        Alert.alert('Booking Conflict', 'This booking request was already processed. Please try a different route.');
+      } else {
+        const errorMsg = error.response?.data?.message || error.response?.data?.errorMessage || 'Failed to book ride. Please check booking-service logs.';
+        Alert.alert('Booking Failed', errorMsg);
+      }
     } finally {
       setLoading(false);
     }
@@ -237,6 +273,16 @@ export default function BookingScreen() {
               <Text style={styles.logoText}>Z</Text>
             </View>
             <Text style={[styles.paymentLabel, paymentMethod === 'ZALOPAY' && styles.activePaymentText]}>ZaloPay</Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            style={[styles.paymentItem, paymentMethod === 'VNPAY' && styles.activePayment]}
+            onPress={() => setPaymentMethod('VNPAY')}
+          >
+            <View style={[styles.paymentLogo, { backgroundColor: '#AA2B52' }]}>
+              <Text style={[styles.logoText, { fontSize: 10 }]}>V</Text>
+            </View>
+            <Text style={[styles.paymentLabel, paymentMethod === 'VNPAY' && styles.activePaymentText]}>VNPay</Text>
           </TouchableOpacity>
         </ScrollView>
 

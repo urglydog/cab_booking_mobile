@@ -2,7 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, FlatList, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { Bell, ChevronLeft, CheckCheck } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { NOTIFICATION_SERVICE_URL } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 

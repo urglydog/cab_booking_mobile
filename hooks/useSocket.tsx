@@ -1,7 +1,7 @@
 import React, { createContext, useContext, useEffect, useState } from 'react';
 import { Alert } from 'react-native';
 import { io, Socket } from 'socket.io-client';
-import { IP_ADDRESS, GATEWAY_URL } from '@/services/api';
+import { BASE_URL } from '@/services/api';
 
 interface SocketContextType {
   socket: Socket | null;
@@ -25,9 +25,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
   const [unreadCount, setUnreadCount] = useState(0);
 
   useEffect(() => {
-    // Connect through API Gateway on port 8080
-    const SOCKET_URL = `http://${IP_ADDRESS}:8080`;
-    const newSocket = io(SOCKET_URL, {
+    const newSocket = io(BASE_URL, {
       query: { userId },
       transports: ['websocket'],
     });

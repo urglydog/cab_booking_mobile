@@ -1,91 +1,235 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Image } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, MapPin, Navigation, Phone, MessageSquare, Star } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Navigation } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
+import { usePayment } from '@/hooks/usePayment';
 import { Colors } from '@/constants/Colors';
+import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
+import { PaymentService } from '@/services/paymentService';
 
 export default function MatchingScreen() {
   const router = useRouter();
   const { bookingId } = useLocalSearchParams();
   const { socket } = useSocket();
+  const { initPayment, startPolling, stopPolling } = usePayment();
 
-  const [status, setStatus] = useState('FINDING'); // FINDING, FOUND, ARRIVING, STARTED, COMPLETED
-  const [driverInfo, setDriverInfo] = useState<any>(null);
+  // Status flow per API guide: CREATED → MATCHING → ASSIGNED → ACCEPTED → PICKUP → IN_PROGRESS → COMPLETED → PAID
+  const [bookingStatus, setBookingStatus] = useState<string>('CREATED');
+  const [bookingInfo, setBookingInfo] = useState<any>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
-  // Pre-seeded high-fidelity route coordinates from Gò Vấp (IUH) to District 1 (Notre Dame Cathedral)
+  // Route coordinates
   const routeCoordinates = [
-    { latitude: 10.8220, longitude: 106.6870 }, // 1. 12 Nguyễn Văn Bảo (IUH Entrance)
-    { latitude: 10.8210, longitude: 106.6830 }, // 2. Nguyễn Văn Bảo & Nguyễn Kiệm junction
-    { latitude: 10.8140, longitude: 106.6780 }, // 3. Nguyễn Kiệm (Gia Định Park)
-    { latitude: 10.8030, longitude: 106.6760 }, // 4. Phú Nhuận Intersection (Hoàng Văn Thụ)
-    { latitude: 10.7930, longitude: 106.6810 }, // 5. Trần Huy Liệu & Nam Kỳ Khởi Nghĩa
-    { latitude: 10.7900, longitude: 106.6840 }, // 6. Nam Kỳ Khởi Nghĩa (Cầu Công Lý bridge)
-    { latitude: 10.7850, longitude: 106.6900 }, // 7. Nam Kỳ Khởi Nghĩa & Điện Biên Phủ
-    { latitude: 10.7790, longitude: 106.6990 }  // 8. Nhà thờ Đức Bà, Quận 1 (Notre Dame Cathedral)
+    { latitude: 10.8220, longitude: 106.6870 },
+    { latitude: 10.8210, longitude: 106.6830 },
+    { latitude: 10.8140, longitude: 106.6780 },
+    { latitude: 10.8030, longitude: 106.6760 },
+    { latitude: 10.7930, longitude: 106.6810 },
+    { latitude: 10.7900, longitude: 106.6840 },
+    { latitude: 10.7850, longitude: 106.6900 },
+    { latitude: 10.7790, longitude: 106.6990 }
   ];
 
+  // Poll booking status every 5s
+  React.useEffect(() => {
+    if (!bookingId) return;
+
+    const fetchBookingInfo = async () => {
+      if (!bookingId) return;
+      try {
+        let response = await api.get(`/booking/api/v1/bookings/${bookingId}`);
+        
+        if (response.status === 404) {
+          response = await api.get(`/api/v1/bookings/${bookingId}`);
+        }
+        
+        if (response.data?.result) {
+          const status = response.data.result.status;
+          setBookingInfo(response.data.result);
+          setBookingStatus(status);
+
+          // Map backend status to UI status
+          if (status === 'MATCHING') {
+            setBookingStatus('FINDING');
+          } else if (status === 'ASSIGNED' || status === 'ACCEPTED' || status === 'PICKUP') {
+            setBookingStatus('FOUND');
+          } else if (status === 'IN_PROGRESS') {
+            setBookingStatus('STARTED');
+          } else if (status === 'COMPLETED') {
+            handleRideCompleted(response.data.result);
+            return;
+          } else if (status === 'PAID' || status === 'CANCELLED') {
+            router.replace('/(tabs)/explore');
+            return;
+          }
+        }
+      } catch (err: any) {
+        if (err.response?.status !== 404) {
+          console.log('Could not fetch booking info:', err.response?.status, err.message);
+        }
+      }
+    };
+
+    fetchBookingInfo();
+    const interval = setInterval(fetchBookingInfo, 5000);
+    return () => clearInterval(interval);
+  }, [bookingId]);
+
+  // Socket notifications
   useEffect(() => {
     if (socket && bookingId) {
-      console.log('Joining room:', bookingId);
+      console.log('Joining booking room:', bookingId);
       socket.emit('join_room', bookingId);
       return () => {
-        console.log('Leaving room:', bookingId);
+        console.log('Leaving booking room:', bookingId);
         socket.emit('leave_room', bookingId);
       };
     }
   }, [socket, bookingId]);
 
   useEffect(() => {
-    if (socket) {
-      const handleNotification = (data: any) => {
-        console.log('Matching Screen received notification:', data);
+    if (!socket) return;
 
-        const message = data.message || '';
+    const handleNotification = (data: any) => {
+      console.log('Matching Screen received notification:', data);
+      const backendStatus = data.status || '';
 
-        // Check for specific states first
-        if (message.includes('tìm thấy tài xế') || message.includes('assigned')) {
-          setStatus('FOUND');
-          // Mock driver info for demo if not provided
-          setDriverInfo({
-            name: 'Nguyễn Văn Tài',
-            plate: '59-G1 123.45',
-            rating: 4.9,
-            vehicle: 'Toyota Vios (Trắng)'
-          });
-        } else if (message.includes('arrived') || message.includes('đã đến')) {
-          setStatus('ARRIVING');
-        } else if (message.includes('tìm tài xế') || message.includes('finding')) {
-          setStatus('FINDING');
-        } else if (message.includes('started') || message.includes('bắt đầu')) {
-          setStatus('STARTED');
-        } else if (message.includes('completed') || message.includes('hoàn thành')) {
-          setStatus('COMPLETED');
-          router.replace('/(tabs)/explore');
+      if (backendStatus === 'MATCHING') {
+        setBookingStatus('FINDING');
+      } else if (backendStatus === 'ASSIGNED') {
+        setBookingStatus('FOUND');
+      } else if (backendStatus === 'ACCEPTED' || backendStatus === 'PICKUP') {
+        setBookingStatus('ARRIVING');
+      } else if (backendStatus === 'IN_PROGRESS') {
+        setBookingStatus('STARTED');
+      } else if (backendStatus === 'COMPLETED') {
+        setBookingStatus('COMPLETED');
+        if (bookingInfo) {
+          handleRideCompleted({ ...bookingInfo, ...data });
         }
-      };
+      } else if (backendStatus === 'PAID') {
+        setBookingStatus('PAID');
+        router.replace('/(tabs)/explore');
+      }
+    };
 
-      socket.on('new_notification', handleNotification);
-      return () => {
-        socket.off('new_notification', handleNotification);
-      };
+    socket.on('new_notification', handleNotification);
+    socket.on('booking_status_update', handleNotification);
+    
+    return () => {
+      socket.off('new_notification', handleNotification);
+      socket.off('booking_status_update', handleNotification);
+    };
+  }, [socket, bookingId, bookingInfo]);
+
+  // Payment flow when ride is COMPLETED
+  const handleRideCompleted = async (info?: any) => {
+    const booking = info || bookingInfo;
+    if (!booking || !bookingId) return;
+
+    const paymentMethod = booking.paymentMethod;
+    const amount = booking.estimatedFare || booking.finalFare || booking.amount || 0;
+
+    // CASH: skip online payment
+    if (paymentMethod === 'CASH') {
+      try {
+        await api.post(`/booking/api/v1/bookings/${bookingId}/complete`, {
+          paymentStatus: 'SUCCESS',
+          paymentMethod: 'CASH'
+        });
+      } catch (e) {
+        console.log('Could not confirm cash payment:', e);
+      }
+      setBookingStatus('PAID');
+      router.replace('/(tabs)/explore');
+      return;
     }
-  }, [socket]);
+
+    setPaymentLoading(true);
+    try {
+      const payment = await initPayment({
+        bookingId: bookingId as string,
+        amount,
+        paymentMethod,
+      });
+
+      const result = await PaymentService.openPaymentGateway(payment);
+
+      if (result.type === 'QR') {
+        router.push({
+          pathname: '/(payment)/payment',
+          params: {
+            transactionId: payment.transactionId,
+            bookingId: bookingId as string,
+            amount: amount.toString(),
+            paymentMethod,
+          },
+        });
+      } else {
+        startPolling(payment.transactionId, (paymentStatus) => {
+          if (paymentStatus === 'SUCCESS') {
+            router.replace({
+              pathname: '/(payment)/payment-success',
+              params: {
+                transactionId: payment.transactionId,
+                bookingId: bookingId as string,
+              },
+            });
+          } else if (paymentStatus === 'FAILED_FINAL') {
+            router.replace({
+              pathname: '/(payment)/payment-failed',
+              params: {
+                transactionId: payment.transactionId,
+                bookingId: bookingId as string,
+                reason: 'Thanh toán không thành công sau nhiều lần thử',
+              },
+            });
+          }
+        });
+
+        router.push({
+          pathname: '/(payment)/payment',
+          params: {
+            transactionId: payment.transactionId,
+            bookingId: bookingId as string,
+            amount: amount.toString(),
+            paymentMethod,
+          },
+        });
+      }
+    } catch (err: any) {
+      console.error('Payment init error:', err);
+      Alert.alert(
+        'Thanh toán thất bại',
+        err?.message || 'Không thể khởi tạo thanh toán. Bạn vẫn có thể hoàn thành thanh toán sau.',
+        [
+          { text: 'Đóng', onPress: () => router.replace('/(tabs)/explore') },
+        ]
+      );
+    } finally {
+      setPaymentLoading(false);
+    }
+  };
 
   const getStatusText = () => {
-    switch (status) {
+    switch (bookingStatus) {
+      case 'CREATED': return 'Đang khởi tạo...';
       case 'FINDING': return 'Đang tìm tài xế...';
       case 'FOUND': return 'Đã tìm thấy tài xế';
       case 'ARRIVING': return 'Tài xế đang đến';
       case 'STARTED': return 'Chuyến đi đã bắt đầu';
+      case 'COMPLETED': return 'Chuyến đi hoàn thành';
+      case 'PAID': return 'Đã thanh toán';
       default: return 'Đang cập nhật...';
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* Header */}
       <View style={styles.header}>
         <TouchableOpacity onPress={() => router.back()} style={styles.backButton}>
           <ChevronLeft size={28} color="#111" />
@@ -99,8 +243,8 @@ export default function MatchingScreen() {
         </TouchableOpacity>
       </View>
 
+      {/* Map */}
       <View style={styles.content}>
-        {/* Real Map View */}
         <MapView
           style={styles.map}
           initialRegion={{
@@ -124,18 +268,7 @@ export default function MatchingScreen() {
             description="Nhà thờ Đức Bà, Quận 1"
             pinColor="#EF4444"
           />
-
-          {/* Dynamic Driver Tracking Marker */}
-          {status !== 'FINDING' && (
-            <Marker
-              coordinate={{ latitude: 10.824, longitude: 106.689 }}
-              title="Tài xế của bạn"
-              description="Đang di chuyển..."
-              pinColor="#6366F1"
-            />
-          )}
-
-          {/* Polyline route connector */}
+          {/* Route Polyline */}
           <Polyline
             coordinates={routeCoordinates}
             strokeColor="#6366F1"
@@ -145,50 +278,55 @@ export default function MatchingScreen() {
 
         {/* Status Card */}
         <View style={styles.statusCard}>
+          {/* Status Badge */}
           <View style={styles.statusBadge}>
-            <ActivityIndicator size="small" color={Colors.light.primary} animating={status === 'FINDING'} />
+            <ActivityIndicator 
+              size="small" 
+              color={Colors.light.primary} 
+              animating={bookingStatus === 'FINDING' || bookingStatus === 'CREATED'} 
+            />
             <Text style={styles.statusText}>{getStatusText()}</Text>
           </View>
 
-          {status !== 'FINDING' && driverInfo && (
-            <View style={styles.driverInfo}>
-              <View style={styles.driverHeader}>
-                <View style={styles.avatarPlaceholder}>
-                  <Image
-                    source={{ uri: 'https://i.pravatar.cc/150?u=driver' }}
-                    style={styles.avatar}
-                  />
-                </View>
-                <View style={styles.driverDetails}>
-                  <Text style={styles.driverName}>{driverInfo.name}</Text>
-                  <View style={styles.ratingContainer}>
-                    <Star size={14} color="#FFD700" fill="#FFD700" />
-                    <Text style={styles.ratingText}>{driverInfo.rating}</Text>
-                  </View>
-                </View>
-                <View style={styles.vehicleDetails}>
-                  <Text style={styles.plateNumber}>{driverInfo.plate}</Text>
-                  <Text style={styles.vehicleName}>{driverInfo.vehicle}</Text>
-                </View>
-              </View>
-
-              <View style={styles.actionButtons}>
-                <TouchableOpacity style={styles.actionButton}>
-                  <Phone size={20} color="#666" />
-                  <Text style={styles.actionText}>Gọi điện</Text>
-                </TouchableOpacity>
-                <TouchableOpacity style={[styles.actionButton, styles.chatButton]}>
-                  <MessageSquare size={20} color="#fff" />
-                  <Text style={[styles.actionText, { color: '#fff' }]}>Nhắn tin</Text>
-                </TouchableOpacity>
-              </View>
+          {/* Fare Info */}
+          {bookingInfo?.estimatedFare && (
+            <View style={styles.fareRow}>
+              <Text style={styles.fareLabel}>Cước phí ước tính</Text>
+              <Text style={styles.fareValue}>{bookingInfo.estimatedFare.toLocaleString()}đ</Text>
             </View>
           )}
 
-          {status === 'FINDING' && (
+          {/* Payment Method */}
+          {bookingInfo?.paymentMethod && (
+            <View style={styles.paymentRow}>
+              <Text style={styles.fareLabel}>Phương thức</Text>
+              <Text style={styles.paymentValue}>{bookingInfo.paymentMethod}</Text>
+            </View>
+          )}
+
+          {/* Payment Loading */}
+          {paymentLoading && (
+            <View style={styles.paymentLoadingOverlay}>
+              <ActivityIndicator size="large" color="#6366F1" />
+              <Text style={styles.paymentLoadingText}>Đang khởi tạo thanh toán...</Text>
+            </View>
+          )}
+
+          {/* Finding / Cancel State */}
+          {(bookingStatus === 'FINDING' || bookingStatus === 'CREATED') && (
             <View style={styles.findingContainer}>
               <Text style={styles.findingSubtext}>Hệ thống đang kết nối bạn với tài xế gần nhất</Text>
-              <TouchableOpacity style={styles.cancelButton} onPress={() => router.back()}>
+              <TouchableOpacity 
+                style={styles.cancelButton}
+                onPress={async () => {
+                  try {
+                    await api.post(`/booking/api/v1/bookings/${bookingId}/cancel`);
+                    router.replace('/(tabs)/explore');
+                  } catch (e) {
+                    Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                  }
+                }}
+              >
                 <Text style={styles.cancelText}>Hủy chuyến</Text>
               </TouchableOpacity>
             </View>
@@ -264,82 +402,35 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     color: '#6366F1',
   },
-  driverInfo: {
-    marginTop: 10,
-  },
-  driverHeader: {
+  fareRow: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
+    paddingVertical: 12,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
   },
-  avatarPlaceholder: {
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: '#EEE',
-    overflow: 'hidden',
-  },
-  avatar: {
-    width: '100%',
-    height: '100%',
-  },
-  driverDetails: {
-    flex: 1,
-    marginLeft: 15,
-  },
-  driverName: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111',
-  },
-  ratingContainer: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 4,
-    marginTop: 2,
-  },
-  ratingText: {
+  fareLabel: {
     fontSize: 14,
     color: '#666',
   },
-  vehicleDetails: {
-    alignItems: 'flex-end',
-  },
-  plateNumber: {
+  fareValue: {
     fontSize: 16,
     fontWeight: 'bold',
     color: '#111',
-    backgroundColor: '#F5F5F5',
-    paddingHorizontal: 8,
-    paddingVertical: 2,
-    borderRadius: 4,
   },
-  vehicleName: {
-    fontSize: 12,
-    color: '#666',
-    marginTop: 4,
-  },
-  actionButtons: {
+  paymentRow: {
     flexDirection: 'row',
-    marginTop: 24,
-    gap: 12,
-  },
-  actionButton: {
-    flex: 1,
-    flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    justifyContent: 'center',
     paddingVertical: 12,
-    borderRadius: 12,
-    backgroundColor: '#F5F5F5',
-    gap: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F0F0F0',
   },
-  chatButton: {
-    backgroundColor: '#6366F1',
-  },
-  actionText: {
-    fontSize: 15,
+  paymentValue: {
+    fontSize: 14,
     fontWeight: '600',
-    color: '#333',
+    color: '#6366F1',
   },
   findingContainer: {
     alignItems: 'center',
@@ -359,5 +450,18 @@ const styles = StyleSheet.create({
     color: '#FF4444',
     fontWeight: 'bold',
     fontSize: 15,
-  }
+  },
+  paymentLoadingOverlay: {
+    marginTop: 16,
+    alignItems: 'center',
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 12,
+    gap: 8,
+  },
+  paymentLoadingText: {
+    fontSize: 14,
+    color: '#6366F1',
+    fontWeight: '600',
+  },
 });

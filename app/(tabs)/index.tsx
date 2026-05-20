@@ -5,7 +5,7 @@ import { Search, Car, Bike, Utensils, ShoppingBag, Bell, Menu, MapPin, ChevronRi
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
-import api, { IP_ADDRESS } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const translateNotificationMessage = (message: string) => {

@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { StyleSheet, View, Text, TextInput, TouchableOpacity, ActivityIndicator, Alert } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter } from 'expo-router';
-import api, { GATEWAY_URL } from '@/services/api';
+import api, { BASE_URL } from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { Colors } from '@/constants/Colors';
 
@@ -25,7 +25,7 @@ export default function LoginScreen() {
         password,
         deviceId: 'mobile-app',
         platform: 'ANDROID',
-      }, { baseURL: GATEWAY_URL }); // Go via API Gateway
+      }, { baseURL: BASE_URL });
 
       const { accessToken, refreshToken, user } = response.data.result;
       

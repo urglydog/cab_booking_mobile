@@ -2,10 +2,12 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Star } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Star, RefreshCw } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { usePayment } from '@/hooks/usePayment';
+import { PaymentService, PaymentMethod } from '@/services/paymentService';
 
 const REVIEW_TAGS = [
   'Dịch vụ 5 sao 🌟',
@@ -19,8 +21,11 @@ const REVIEW_TAGS = [
 export default function RideDetailScreen() {
   const { bookingId } = useLocalSearchParams();
   const router = useRouter();
+  const { initPayment } = usePayment();
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
+  const [paymentInfo, setPaymentInfo] = useState<any>(null);
+  const [paymentLoading, setPaymentLoading] = useState(false);
 
   // Review states
   const [rating, setRating] = useState(5);
@@ -66,14 +71,26 @@ export default function RideDetailScreen() {
       }
     }
 
-    // 2. Fetch existing review for this ride from MongoDB (via review-service)
+    // 2. Fetch payment info
+    if (bookingData && bookingData.status === 'COMPLETED') {
+      try {
+        const paymentResponse = await api.get(`/api/payments/booking/${bookingId}`);
+        if (paymentResponse.data?.result) {
+          setPaymentInfo(paymentResponse.data.result);
+        }
+      } catch {
+        console.log('No payment info found or payment not yet initiated.');
+      }
+    }
+
+    // 3. Fetch existing review for this ride from MongoDB (via review-service)
     if (bookingData && bookingData.status === 'COMPLETED') {
       try {
         const reviewResponse = await api.get(`/api/reviews/ride/${bookingId}`);
         if (reviewResponse.data) {
           const rev = reviewResponse.data;
           setRating(rev.rating || 5);
-          
+
           // Parse out selected tags if format is "[Tag1, Tag2] Comment"
           let parsedComment = rev.comment || '';
           if (parsedComment.startsWith('[')) {
@@ -132,6 +149,51 @@ export default function RideDetailScreen() {
 
   const getPaymentMethodLabel = (method: string) => {
     return method === 'CASH' ? 'Tiền mặt' : 'Thẻ điện tử';
+  };
+
+  const getPaymentStatusLabel = (status: string) => {
+    const labels: Record<string, { text: string; color: string }> = {
+      SUCCESS: { text: 'Đã thanh toán', color: '#10B981' },
+      PENDING: { text: 'Đang chờ thanh toán', color: '#F59E0B' },
+      FAILED: { text: 'Thanh toán thất bại', color: '#EF4444' },
+      FAILED_FINAL: { text: 'Thanh toán thất bại', color: '#EF4444' },
+      RETRY: { text: 'Đang thử lại', color: '#F59E0B' },
+      INIT: { text: 'Khởi tạo', color: '#6366F1' },
+    };
+    return labels[status] || { text: status || 'Chưa thanh toán', color: '#999' };
+  };
+
+  const handlePayNow = async () => {
+    if (!booking) return;
+    const paymentMethod = booking.paymentMethod as PaymentMethod;
+    const amount = booking.estimatedFare || booking.finalFare || 0;
+
+    setPaymentLoading(true);
+    try {
+      const payment = await initPayment({
+        bookingId: bookingId as string,
+        amount,
+        paymentMethod,
+      });
+
+      const result = await PaymentService.openPaymentGateway(payment);
+
+      if (result.type === 'QR') {
+        router.push({
+          pathname: '/(payment)/payment',
+          params: {
+            transactionId: payment.transactionId,
+            bookingId: bookingId as string,
+            amount: amount.toString(),
+            paymentMethod,
+          },
+        });
+      }
+    } catch (err: any) {
+      Alert.alert('Lỗi', err?.message || 'Không thể khởi tạo thanh toán');
+    } finally {
+      setPaymentLoading(false);
+    }
   };
 
   const handleToggleTag = (tag: string) => {
@@ -274,6 +336,48 @@ export default function RideDetailScreen() {
               <Text style={styles.infoValue}>{getPaymentMethodLabel(booking.paymentMethod)}</Text>
             </View>
           </View>
+
+          {/* Payment Status Section */}
+          {booking.status === 'COMPLETED' && (
+            <View style={styles.paymentStatusSection}>
+              <View style={styles.paymentStatusRow}>
+                <View style={styles.infoIconWrapper}>
+                  <CreditCard size={20} color="#666" />
+                </View>
+                <View style={styles.infoTextWrapper}>
+                  <Text style={styles.infoLabel}>Trạng thái thanh toán</Text>
+                  {paymentInfo ? (
+                    <View style={styles.paymentStatusValue}>
+                      <Text style={[styles.paymentStatusText, { color: getPaymentStatusLabel(paymentInfo.status).color }]}>
+                        {getPaymentStatusLabel(paymentInfo.status).text}
+                      </Text>
+                      {paymentInfo.status === 'FAILED' && (
+                        <TouchableOpacity onPress={handlePayNow} style={styles.payNowButton}>
+                          <RefreshCw size={14} color="#EF4444" />
+                          <Text style={styles.payNowText}>Thanh toán lại</Text>
+                        </TouchableOpacity>
+                      )}
+                      {paymentInfo.status === 'SUCCESS' && paymentInfo.transactionId && (
+                        <Text style={styles.txnIdText}>Mã GD: {paymentInfo.transactionId}</Text>
+                      )}
+                    </View>
+                  ) : booking.paymentMethod !== 'CASH' ? (
+                    <TouchableOpacity onPress={handlePayNow} disabled={paymentLoading}>
+                      {paymentLoading ? (
+                        <ActivityIndicator size="small" color="#6366F1" />
+                      ) : (
+                        <View style={styles.payNowBadge}>
+                          <Text style={styles.payNowBadgeText}>Thanh toán ngay</Text>
+                        </View>
+                      )}
+                    </TouchableOpacity>
+                  ) : (
+                    <Text style={[styles.paymentStatusText, { color: '#10B981' }]}>Thanh toán khi kết thúc chuyến</Text>
+                  )}
+                </View>
+              </View>
+            </View>
+          )}
 
           <View style={styles.infoRow}>
             <View style={styles.infoIconWrapper}>
@@ -587,6 +691,50 @@ const styles = StyleSheet.create({
     fontSize: 15,
     color: '#1F2937',
     marginTop: 1,
+  },
+  paymentStatusSection: {
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    paddingTop: 12,
+    marginTop: 4,
+  },
+  paymentStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+  },
+  paymentStatusValue: {
+    flexDirection: 'column',
+    gap: 4,
+  },
+  paymentStatusText: {
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  payNowButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+  },
+  payNowText: {
+    fontSize: 13,
+    color: '#EF4444',
+    fontWeight: '600',
+  },
+  txnIdText: {
+    fontSize: 12,
+    color: '#9CA3AF',
+    fontFamily: 'monospace',
+  },
+  payNowBadge: {
+    backgroundColor: '#EF444415',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 8,
+  },
+  payNowBadgeText: {
+    fontSize: 13,
+    color: '#EF4444',
+    fontWeight: '700',
   },
   driverRow: {
     flexDirection: 'row',

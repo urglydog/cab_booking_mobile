@@ -3,7 +3,7 @@ import { StyleSheet, View, Text, FlatList, TouchableOpacity, RefreshControl, Act
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Car, Bike, ChevronRight, History } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-import api, { BOOKING_SERVICE_URL } from '@/services/api';
+import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { useRouter } from 'expo-router';
 
@@ -22,9 +22,7 @@ export default function ActivityScreen() {
         return;
       }
       
-      console.log('🔍 Fetching History from:', `${BOOKING_SERVICE_URL}/api/v1/bookings/customer/${userId}?page=0&size=20`);
-      
-      const response = await api.get(`${BOOKING_SERVICE_URL}/api/v1/bookings/customer/${userId}?page=0&size=20`);
+      const response = await api.get(`/api/v1/bookings/customer/${userId}?page=0&size=20`);
       
       console.log('📥 History Response:', response.status);
       console.log('📋 History Data Length:', response.data?.result?.content?.length || 0);
