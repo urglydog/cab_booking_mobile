@@ -99,23 +99,7 @@ export default function RegisterScreen() {
             />
           </View>
 
-          <View style={styles.inputContainer}>
-            <Text style={styles.label}>Loại tài khoản</Text>
-            <View style={styles.roleSelectorRow}>
-              <TouchableOpacity
-                style={[styles.roleSelectButton, role === 'USER' && styles.roleActiveButton]}
-                onPress={() => setRole('USER')}
-              >
-                <Text style={[styles.roleSelectText, role === 'USER' && styles.roleActiveText]}>Khách hàng</Text>
-              </TouchableOpacity>
-              <TouchableOpacity
-                style={[styles.roleSelectButton, role === 'DRIVER' && styles.roleActiveButton]}
-                onPress={() => setRole('DRIVER')}
-              >
-                <Text style={[styles.roleSelectText, role === 'DRIVER' && styles.roleActiveText]}>Tài xế đối tác</Text>
-              </TouchableOpacity>
-            </View>
-          </View>
+
 
           <TouchableOpacity 
             style={[styles.button, loading && styles.buttonDisabled]} 
