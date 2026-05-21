@@ -1,10 +1,10 @@
 import React from 'react';
 import { Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Navigation } from 'lucide-react-native';
-import { FrontendVehicleType } from '@/services/pricingService';
+import { VehicleTier } from '@/services/pricingService';
 
 interface BookButtonProps {
-  vehicleType: FrontendVehicleType;
+  vehicleType: VehicleTier;
   dropoffCoords: { latitude: number; longitude: number } | null;
   loading: boolean;
   countdown: number | null;
@@ -22,6 +22,8 @@ export default function BookButton({
 }: BookButtonProps) {
   const isDisabled = !dropoffCoords || loading || (countdown !== null && estimateExpired);
 
+  const buttonLabel = vehicleType === 'BIKE' ? 'XE MÁY' : vehicleType === 'CAR4' ? 'XE 4 CHỖ' : 'XE 7 CHỖ';
+
   return (
     <>
       <TouchableOpacity
@@ -33,9 +35,7 @@ export default function BookButton({
           <ActivityIndicator color="#fff" />
         ) : (
           <>
-            <Text style={styles.bookButtonText}>
-              ĐẶT {vehicleType === 'CAR' ? 'XE HƠI' : 'XE MÁY'}
-            </Text>
+            <Text style={styles.bookButtonText}>ĐẶT {buttonLabel}</Text>
             <Navigation size={20} color="#fff" />
           </>
         )}
