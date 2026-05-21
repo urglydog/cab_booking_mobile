@@ -13,6 +13,43 @@ import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PaymentService } from '@/services/paymentService';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 
+// Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
+const generateRouteCoords = (
+  start: { latitude: number; longitude: number },
+  end: { latitude: number; longitude: number }
+) => {
+  const coords = [start];
+  const dLat = end.latitude - start.latitude;
+  const dLng = end.longitude - start.longitude;
+
+  // Actual perpendicular normal vector of the start-end segment
+  const perpLat = -dLng;
+  const perpLng = dLat;
+
+  const numSteps = 8;
+  for (let i = 1; i < numSteps; i++) {
+    const ratio = i / numSteps;
+    // Base linear point
+    const lat = start.latitude + dLat * ratio;
+    const lng = start.longitude + dLng * ratio;
+
+    // Multi-frequency wave using sine to create an elegant curved S-route (sin curve)
+    const wave = Math.sin(ratio * Math.PI * 2);
+    
+    // Perpendicular offset scaled to 24% of the distance to give a beautiful natural curve
+    const offsetScale = 0.24;
+    const latOffset = perpLat * wave * offsetScale;
+    const lngOffset = perpLng * wave * offsetScale;
+
+    coords.push({
+      latitude: lat + latOffset,
+      longitude: lng + lngOffset,
+    });
+  }
+  coords.push(end);
+  return coords;
+};
+
 export default function MatchingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
@@ -50,16 +87,10 @@ export default function MatchingScreen() {
 
   const hasValidCoords = pLat !== 0 && dLat !== 0;
 
-  // Route polyline coordinates (straight line between pickup and dropoff)
+  // Route polyline coordinates (beautiful curved S-route between pickup and dropoff)
   const routeCoordinates = hasValidCoords
-    ? [
-        { latitude: pLat, longitude: pLng },
-        { latitude: dLat, longitude: dLng },
-      ]
-    : [
-        { latitude: 10.822, longitude: 106.687 },
-        { latitude: 10.779, longitude: 106.699 },
-      ];
+    ? generateRouteCoords({ latitude: pLat, longitude: pLng }, { latitude: dLat, longitude: dLng })
+    : generateRouteCoords({ latitude: 10.822, longitude: 106.687 }, { latitude: 10.779, longitude: 106.699 });
 
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;

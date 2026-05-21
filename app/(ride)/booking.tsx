@@ -32,6 +32,90 @@ const PROMO_CODES = [
 
 const ESTIMATE_DEBOUNCE_MS = 1200;
 
+const LOCAL_FAMOUS_PLACES = [
+  {
+    id: 'famous-iuh',
+    text: 'Đại học Công nghiệp TP.HCM (IUH)',
+    place_name: 'Trường Đại học Công nghiệp TP.HCM (IUH) - 12 Nguyễn Văn Bảo, Phường 4, Gò Vấp, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6885, 10.8221]
+    }
+  },
+  {
+    id: 'famous-landmark81',
+    text: 'Landmark 81',
+    place_name: 'Tòa nhà Landmark 81 - 720A Điện Biên Phủ, Vinhomes Tân Cảng, Bình Thạnh, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.7218, 10.7948]
+    }
+  },
+  {
+    id: 'famous-vanlang',
+    text: 'Đại học Văn Lang (Cơ sở 3)',
+    place_name: 'Trường Đại học Văn Lang (Cơ sở 3) - 69/68 Đặng Thùy Trâm, Phường 13, Bình Thạnh, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.7011, 10.8275]
+    }
+  },
+  {
+    id: 'famous-tansonnhat',
+    text: 'Sân bay Quốc tế Tân Sơn Nhất (SGN)',
+    place_name: 'Sân bay Quốc tế Tân Sơn Nhất - Trường Sơn, Phường 2, Tân Bình, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6619, 10.8188]
+    }
+  },
+  {
+    id: 'famous-ducba',
+    text: 'Nhà thờ Đức Bà Sài Gòn',
+    place_name: 'Nhà thờ Đức Bà - 1 Công xã Paris, Bến Nghé, Quận 1, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6990, 10.7798]
+    }
+  },
+  {
+    id: 'famous-benthanh',
+    text: 'Chợ Bến Thành',
+    place_name: 'Chợ Bến Thành - Lê Lợi, Phường Bến Thành, Quận 1, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6983, 10.7719]
+    }
+  },
+  {
+    id: 'famous-nguyenhue',
+    text: 'Phố đi bộ Nguyễn Huệ',
+    place_name: 'Phố đi bộ Nguyễn Huệ - Nguyễn Huệ, Bến Nghé, Quận 1, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.7037, 10.7740]
+    }
+  },
+  {
+    id: 'famous-aeontanphu',
+    text: 'AEON Mall Tân Phú Celadon',
+    place_name: 'AEON Mall Tân Phú - 30 Bờ Bao Tân Thắng, Sơn Kỳ, Tân Phú, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6157, 10.8032]
+    }
+  },
+  {
+    id: 'famous-bachkhoa',
+    text: 'Đại học Bách Khoa TP.HCM (CS1)',
+    place_name: 'Trường Đại học Bách Khoa TP.HCM - 268 Lý Thường Kiệt, Phường 14, Quận 10, Hồ Chí Minh',
+    geometry: {
+      type: 'Point',
+      coordinates: [106.6580, 10.7724]
+    }
+  }
+];
+
 // ─────────────────────────────────────────────
 // Debounce helper
 // ─────────────────────────────────────────────
@@ -120,13 +204,20 @@ export default function BookingScreen() {
       return;
     }
 
+    const queryLower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
+    const localMatches = LOCAL_FAMOUS_PLACES.filter(place => {
+      const placeTextNorm = place.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
+      const placeNameNorm = place.place_name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
+      return placeTextNorm.includes(queryLower) || placeNameNorm.includes(queryLower);
+    });
+
     const searchId = ++latestSearchRef.current;
     setSearching(true);
     try {
       const MAPBOX_KEY = process.env.EXPO_PUBLIC_MAPBOX_API_KEY ?? '';
       if (!MAPBOX_KEY) {
         console.warn('MAPBOX_API_KEY not configured');
-        if (searchId === latestSearchRef.current) setSuggestions([]);
+        if (searchId === latestSearchRef.current) setSuggestions(localMatches);
         return;
       }
 
@@ -134,10 +225,22 @@ export default function BookingScreen() {
         `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_KEY}&country=vn&limit=8&language=vi`
       );
       const data = await response.json();
-      if (searchId === latestSearchRef.current) setSuggestions(data.features ?? []);
+      
+      const mapboxFeatures = data.features ?? [];
+      const combined = [...localMatches];
+      mapboxFeatures.forEach((feat: any) => {
+        const isDuplicate = combined.some(
+          item => item.id === feat.id || item.text.toLowerCase() === feat.text.toLowerCase()
+        );
+        if (!isDuplicate) {
+          combined.push(feat);
+        }
+      });
+
+      if (searchId === latestSearchRef.current) setSuggestions(combined);
     } catch (e) {
       console.error('Geocoding error:', e);
-      if (searchId === latestSearchRef.current) setSuggestions([]);
+      if (searchId === latestSearchRef.current) setSuggestions(localMatches);
     } finally {
       if (searchId === latestSearchRef.current) setSearching(false);
     }
@@ -315,22 +418,25 @@ export default function BookingScreen() {
       const vehicleTierForApi: VehicleTier = vehicleTier;
 
       const bookingRequest = {
-        customerId,
         pickupLocation: pickup,
         dropoffLocation: dropoff,
-        pickupLat:    pickupCoords.latitude,
-        pickupLng:    pickupCoords.longitude,
-        dropoffLat:   dropoffCoords.latitude,
-        dropoffLng:   dropoffCoords.longitude,
-        vehicleType:  vehicleTierForApi,
-        paymentMethod,
-        estimatedFare: finalFare,
         customerNote:  selectedPromo
           ? `Áp dụng mã ${selectedPromo.code}`
           : 'Vui lòng đón tôi ở cổng chính.',
+        pickupCoordinates: {
+          lat: pickupCoords.latitude,
+          lng: pickupCoords.longitude,
+        },
+        dropoffCoordinates: {
+          lat: dropoffCoords.latitude,
+          lng: dropoffCoords.longitude,
+        },
+        vehicleType:  vehicleTierForApi,
+        paymentMethod,
+        estimatedFare: finalFare,
+        promoCode:     selectedPromo ? selectedPromo.code : '',
+        quoteToken:    est?.estimateId ?? '',
         idempotencyKey,
-        estimateId:        est?.estimateId,
-        quotePayloadHash:  est?.quotePayloadHash,
       };
 
       const response = await api.post('/api/v1/bookings', bookingRequest);
