@@ -3,10 +3,9 @@
  * Ensures consistency between frontend vehicle types and backend vehicle tiers
  */
 
-import { VehicleTier, FrontendVehicleType, mapVehicleTypeToTier } from './pricingService';
+import { VehicleTier } from './pricingService';
 
-export type { VehicleTier, FrontendVehicleType };
-export { mapVehicleTypeToTier };
+export type { VehicleTier };
 
 /** Payload for creating a booking — vehicleType uses backend VehicleTier */
 export interface CreateBookingPayload {

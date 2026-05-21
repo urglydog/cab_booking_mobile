@@ -1,6 +1,6 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
-import { Car } from 'lucide-react-native';
+import { Bike, Car } from 'lucide-react-native';
 import { VehicleTier, VEHICLE_TIER_LABELS } from '@/services/pricingService';
 
 interface VehicleTierSelectionProps {
@@ -11,18 +11,24 @@ interface VehicleTierSelectionProps {
 }
 
 const TIER_DESCRIPTIONS: Record<VehicleTier, string> = {
-  ECONOMY: 'Xe phổ thông, giá tốt nhất',
-  COMFORT: 'Xe rộng rãi, điều hòa mát',
-  PREMIUM: 'Xe sang trọng, trải nghiệm cao cấp',
+  BIKE: 'Di chuyển nhanh, giá tiết kiệm',
+  CAR4: 'Xe 4 chỗ, thoải mái cho gia đình nhỏ',
+  CAR7: 'Xe 7 chỗ, phù hợp nhóm đông người',
 };
 
 const TIER_COLORS: Record<VehicleTier, string> = {
-  ECONOMY: '#10B981',
-  COMFORT: '#6366F1',
-  PREMIUM: '#F59E0B',
+  BIKE: '#F59E0B',
+  CAR4: '#10B981',
+  CAR7: '#6366F1',
 };
 
-const TIERS: VehicleTier[] = ['ECONOMY', 'COMFORT', 'PREMIUM'];
+const TIER_ICONS: Record<VehicleTier, React.ReactNode> = {
+  BIKE: <Bike size={20} color="#fff" />,
+  CAR4: <Car size={20} color="#fff" />,
+  CAR7: <Car size={20} color="#fff" />,
+};
+
+const TIERS: VehicleTier[] = ['BIKE', 'CAR4', 'CAR7'];
 
 export default function VehicleTierSelection({
   selectedTier,
@@ -48,7 +54,7 @@ export default function VehicleTierSelection({
             >
               <View style={styles.tierLeft}>
                 <View style={[styles.tierIcon, isActive && styles.activeTierIcon]}>
-                  <Car size={20} color={isActive ? '#fff' : '#9CA3AF'} />
+                  {TIER_ICONS[tier]}
                 </View>
                 <View style={{ flex: 1 }}>
                   <View style={styles.tierNameRow}>

@@ -24,12 +24,12 @@ import api from './api';
 // ─────────────────────────────────────────────
 
 /** Vehicle tier supported by the Pricing-Service */
-export type VehicleTier = 'ECONOMY' | 'COMFORT' | 'PREMIUM';
+export type VehicleTier = 'BIKE' | 'CAR4' | 'CAR7';
 
 export const VEHICLE_TIER_LABELS: Record<VehicleTier, string> = {
-  ECONOMY: 'Economy',
-  COMFORT: 'Comfort',
-  PREMIUM: 'Premium',
+  BIKE: 'Xe máy',
+  CAR4: 'Xe 4 chỗ',
+  CAR7: 'Xe 7 chỗ',
 };
 
 /** Estimate status lifecycle */
@@ -321,7 +321,7 @@ export const PricingService = {
    * List estimates with optional filters (GET /api/pricing/estimates)
    *
    * @param filters.status     - PENDING | CONFIRMED | EXPIRED | CANCELLED
-   * @param filters.vehicleType - ECONOMY | COMFORT | PREMIUM
+   * @param filters.vehicleType - BIKE | CAR4 | CAR7
    * @param filters.pickupZone - Filter by pickup zone
    * @param filters.limit      - Default 50
    * @param filters.offset     - Default 0
@@ -450,25 +450,25 @@ export const PricingService = {
 
 /** Default pricing values (VND) when API is unavailable */
 export const FALLBACK_PRICING = {
-  economy: {
+  bike: {
+    baseFare: 8000,
+    perKm: 3500,
+    perMinute: 400,
+    minimumFare: 15000,
+    platformFee: 2000,
+  },
+  car4: {
     baseFare: 12000,
     perKm: 8500,
     perMinute: 1200,
     minimumFare: 25000,
     platformFee: 2000,
   },
-  comfort: {
-    baseFare: 18000,
+  car7: {
+    baseFare: 20000,
     perKm: 12000,
-    perMinute: 1600,
-    minimumFare: 38000,
-    platformFee: 2500,
-  },
-  premium: {
-    baseFare: 30000,
-    perKm: 18000,
-    perMinute: 2500,
-    minimumFare: 50000,
+    perMinute: 1800,
+    minimumFare: 40000,
     platformFee: 3000,
   },
 } as const;
@@ -481,7 +481,7 @@ export function calculateFallbackFare(
   pickupLng: number,
   dropoffLat: number,
   dropoffLng: number,
-  tier: VehicleTier = 'ECONOMY',
+  tier: VehicleTier = 'CAR4',
   durationMinutes = 25
 ): number {
   const R = 6371; // Earth radius in km
@@ -497,8 +497,8 @@ export function calculateFallbackFare(
   const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
   const distanceKm = R * c;
 
-  const key = tier.toLowerCase() as 'economy' | 'comfort' | 'premium';
-  const config = FALLBACK_PRICING[key] ?? FALLBACK_PRICING.economy;
+  const key = tier.toLowerCase() as 'bike' | 'car4' | 'car7';
+  const config = FALLBACK_PRICING[key] ?? FALLBACK_PRICING.car4;
   const subtotal =
     config.baseFare +
     distanceKm * config.perKm +

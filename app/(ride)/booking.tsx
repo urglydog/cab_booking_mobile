@@ -58,16 +58,16 @@ export default function BookingScreen() {
   const [dropoff,       setDropoff]       = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const [vehicleTier, setVehicleTier]   = useState<VehicleTier>('ECONOMY');
+  const [vehicleTier, setVehicleTier]   = useState<VehicleTier>('CAR4');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [loading, setLoading]           = useState(false);
   const [selectedPromo, setSelectedPromo] = useState<typeof PROMO_CODES[0] | null>(null);
 
   // ── Estimate state ──────────────────────────────────────────
   const [estimates, setEstimates] = useState<Record<VehicleTier, FareEstimateResponse | null>>({
-    ECONOMY: null,
-    COMFORT: null,
-    PREMIUM: null,
+    BIKE: null,
+    CAR4: null,
+    CAR7: null,
   });
 
   const [estimateLoading, setEstimateLoading] = useState(false);
@@ -82,7 +82,7 @@ export default function BookingScreen() {
   const latestSearchRef = useRef(0);
 
   const clearStaleEstimate = () => {
-    setEstimates({ ECONOMY: null, COMFORT: null, PREMIUM: null });
+    setEstimates({ BIKE: null, CAR4: null, CAR7: null });
     setCountdown(null);
     setEstimateExpired(false);
     setEstimateError(null);
@@ -175,16 +175,16 @@ export default function BookingScreen() {
 
     try {
       // Fetch estimates for all 3 tiers in parallel
-      const [econ, comfort, premium] = await Promise.all([
+      const [bike, car4, car7] = await Promise.all([
         PricingService.createEstimate(
           {
             pickupLat:    pC.latitude,
             pickupLng:    pC.longitude,
             dropoffLat:   dC.latitude,
             dropoffLng:   dC.longitude,
-            vehicleType:  'ECONOMY',
+            vehicleType:  'BIKE',
           },
-          `${idempotencyKey}_econ`
+          `${idempotencyKey}_bike`
         ),
         PricingService.createEstimate(
           {
@@ -192,9 +192,9 @@ export default function BookingScreen() {
             pickupLng:    pC.longitude,
             dropoffLat:   dC.latitude,
             dropoffLng:   dC.longitude,
-            vehicleType:  'COMFORT',
+            vehicleType:  'CAR4',
           },
-          `${idempotencyKey}_comfort`
+          `${idempotencyKey}_car4`
         ),
         PricingService.createEstimate(
           {
@@ -202,16 +202,16 @@ export default function BookingScreen() {
             pickupLng:    pC.longitude,
             dropoffLat:   dC.latitude,
             dropoffLng:   dC.longitude,
-            vehicleType:  'PREMIUM',
+            vehicleType:  'CAR7',
           },
-          `${idempotencyKey}_premium`
+          `${idempotencyKey}_car7`
         ),
       ]);
 
-      setEstimates({ ECONOMY: econ, COMFORT: comfort, PREMIUM: premium });
+      setEstimates({ BIKE: bike, CAR4: car4, CAR7: car7 });
 
-      // Start countdown from the ECONOMY estimate expiry
-      const remaining = getRemainingSeconds(econ.expiresAt);
+      // Start countdown from the CAR4 estimate expiry
+      const remaining = getRemainingSeconds(car4.expiresAt);
       setCountdown(remaining);
 
     } catch (err: any) {
@@ -250,14 +250,14 @@ export default function BookingScreen() {
         message:          'Giá ước tính (fallback)',
       });
 
-      const econFare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'ECONOMY', 25);
-      const comfortFare = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'COMFORT', 25);
-      const premiumFare = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'PREMIUM', 25);
+      const bikeFare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'BIKE', 25);
+      const car4Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR4', 25);
+      const car7Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR7', 25);
 
       setEstimates({
-        ECONOMY: fallbackEst(econFare,    'ECONOMY'),
-        COMFORT: fallbackEst(comfortFare, 'COMFORT'),
-        PREMIUM: fallbackEst(premiumFare,  'PREMIUM'),
+        BIKE: fallbackEst(bikeFare,  'BIKE'),
+        CAR4: fallbackEst(car4Fare,  'CAR4'),
+        CAR7: fallbackEst(car7Fare,  'CAR7'),
       });
     } finally {
       setEstimateLoading(false);
@@ -311,7 +311,7 @@ export default function BookingScreen() {
       const idempotencyKey = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
       const est = selectedEstimate;
-      // vehicleTier is already ECONOMY / COMFORT / PREMIUM
+      // vehicleTier is already BIKE / CAR4 / CAR7
       const vehicleTierForApi: VehicleTier = vehicleTier;
 
       const bookingRequest = {
@@ -456,7 +456,7 @@ export default function BookingScreen() {
 
         {/* Book Button */}
         <BookButton
-          vehicleType={'CAR'}
+          vehicleType={vehicleTier}
           dropoffCoords={dropoffCoords}
           loading={loading}
           countdown={countdown}
