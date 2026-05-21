@@ -31,7 +31,7 @@ export default function ActivityScreen() {
         const fetchedBookings = response.data.result.content || [];
         
         const mockCompleted = {
-          id: 'mock-completed-for-review',
+          id: 'booking-mock-123',
           assignedDriverId: 'driver-mock-456',
           pickupLocation: 'Trường ĐH Công nghiệp TP.HCM, Gò Vấp',
           dropoffLocation: 'Sân bay Tân Sơn Nhất',
@@ -83,41 +83,47 @@ export default function ActivityScreen() {
   };
 
   const renderItem = ({ item }) => (
-    <TouchableOpacity 
-      style={styles.activityItem} 
-      onPress={() => router.push({
-        pathname: '/(ride)/detail',
-        params: { bookingId: item.id }
-      })}
-    >
-      <View style={styles.iconContainer}>
-        {item.vehicleType === 'BIKE' ? <Bike size={24} color="#666" /> : <Car size={24} color="#666" />}
-      </View>
-      <View style={styles.activityInfo}>
-        <Text style={styles.destination} numberOfLines={1}>{item.dropoffLocation}</Text>
-        <Text style={styles.dateTime}>{new Date(item.createdAt).toLocaleString('vi-VN')}</Text>
-        <Text style={[styles.status, { color: getStatusColor(item.status) }]}>
-          {getStatusInVietnamese(item.status)}
-        </Text>
-      </View>
-      <View style={styles.priceContainer}>
-        <View style={{ alignItems: 'flex-end' }}>
-          <Text style={styles.price}>{item.estimatedFare?.toLocaleString()}đ</Text>
-          {item.status === 'COMPLETED' && (
-            <TouchableOpacity 
-              style={styles.rateButton}
-              onPress={() => router.push({
-                pathname: '/(review)/review',
-                params: { rideId: item.id, driverId: item.assignedDriverId || 'driver-mock-456' }
-              })}
-            >
-              <Text style={styles.rateButtonText}>Đánh giá</Text>
-            </TouchableOpacity>
-          )}
+    <View style={styles.activityItem}>
+      {/* Chi tiết chuyến đi */}
+      <TouchableOpacity 
+        style={{ flex: 1, flexDirection: 'row', alignItems: 'center' }} 
+        onPress={() => router.push({
+          pathname: '/(ride)/detail',
+          params: { bookingId: item.id }
+        })}
+      >
+        <View style={styles.iconContainer}>
+          {item.vehicleType === 'BIKE' ? <Bike size={24} color="#666" /> : <Car size={24} color="#666" />}
         </View>
-        <ChevronRight size={20} color="#CCC" />
+        <View style={styles.activityInfo}>
+          <Text style={styles.destination} numberOfLines={1}>{item.dropoffLocation}</Text>
+          <Text style={styles.dateTime}>{new Date(item.createdAt).toLocaleString('vi-VN')}</Text>
+          <Text style={[styles.status, { color: getStatusColor(item.status) }]}>
+            {getStatusInVietnamese(item.status)}
+          </Text>
+        </View>
+        <View style={{ marginRight: 10, alignItems: 'flex-end' }}>
+          <Text style={styles.price}>{item.estimatedFare?.toLocaleString()}đ</Text>
+        </View>
+      </TouchableOpacity>
+
+      {/* Nút Đánh giá (Độc lập Sibling) */}
+      <View style={styles.priceContainer}>
+        {item.status === 'COMPLETED' ? (
+          <TouchableOpacity 
+            style={styles.rateButton}
+            onPress={() => router.push({
+              pathname: '/(review)/review',
+              params: { rideId: item.id, driverId: item.assignedDriverId || 'driver-mock-456' }
+            })}
+          >
+            <Text style={styles.rateButtonText}>Đánh giá</Text>
+          </TouchableOpacity>
+        ) : (
+          <ChevronRight size={20} color="#CCC" />
+        )}
       </View>
-    </TouchableOpacity>
+    </View>
   );
 
   return (

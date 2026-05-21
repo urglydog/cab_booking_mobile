@@ -2,12 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { StyleSheet, View, Text, ActivityIndicator, TouchableOpacity, ScrollView, Alert, TextInput } from 'react-native';
 import { useLocalSearchParams, useRouter } from 'expo-router';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Star, RefreshCw } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Calendar, CreditCard, Car, Bike, ShieldAlert, FileText, Star, RefreshCw, Zap, Route, Clock, Info } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePayment } from '@/hooks/usePayment';
 import { PaymentService, PaymentMethod } from '@/services/paymentService';
+import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 
 const REVIEW_TAGS = [
   'Dịch vụ 5 sao 🌟',
@@ -37,27 +38,25 @@ export default function RideDetailScreen() {
     let bookingData = null;
 
     // 1. Fetch booking info
-    if (bookingId === 'booking-mock-123') {
+    if (bookingId && bookingId.toString().startsWith('booking-mock')) {
       bookingData = {
-        id: 'booking-mock-123',
+        id: bookingId.toString(),
         customerId: 'demo-user',
         assignedDriverId: 'driver-mock-456',
         pickupLocation: '12 Nguyễn Văn Bảo, Gò Vấp (Đại học Công nghiệp TP.HCM)',
         dropoffLocation: 'Dinh Thống Nhất, Quận 1',
         vehicleType: 'CAR',
         paymentMethod: 'CASH',
-        estimatedFare: 120000,
+        estimatedFare: 75000,
         status: 'COMPLETED',
         createdAt: new Date().toISOString(),
         customerNote: 'Vui lòng đón tôi ở cổng chính Nguyễn Văn Bảo.'
       };
-      setBooking(bookingData);
     } else {
       try {
         const response = await api.get(`/api/v1/bookings/${bookingId}`);
         if (response.data && response.data.result) {
           bookingData = response.data.result;
-          setBooking(bookingData);
         } else {
           Alert.alert('Lỗi', 'Không tìm thấy thông tin chuyến đi.');
           setLoading(false);
@@ -71,47 +70,65 @@ export default function RideDetailScreen() {
       }
     }
 
-    // 2. Fetch payment info
-    if (bookingData && bookingData.status === 'COMPLETED') {
+    // 2. Fetch local promo info stored from AI or main booking flow
+    if (bookingData) {
       try {
-        const paymentResponse = await api.get(`/api/payments/booking/${bookingId}`);
-        if (paymentResponse.data?.result) {
-          setPaymentInfo(paymentResponse.data.result);
+        const localPromo = await AsyncStorage.getItem(`booking_promo_${bookingId}`);
+        if (localPromo) {
+          const promoObj = JSON.parse(localPromo);
+          bookingData.promoCode = promoObj.promoCode;
+          bookingData.discountAmount = promoObj.discountAmount;
+          bookingData.baseFare = promoObj.baseFare || (bookingData.estimatedFare + promoObj.discountAmount);
         }
-      } catch {
-        console.log('No payment info found or payment not yet initiated.');
+      } catch (e) {
+        console.log('Failed to read local promo info:', e);
       }
+      setBooking(bookingData);
     }
 
-    // 3. Fetch existing review for this ride from MongoDB (via review-service)
-    if (bookingData && bookingData.status === 'COMPLETED') {
-      try {
-        const reviewResponse = await api.get(`/api/reviews/ride/${bookingId}`);
-        if (reviewResponse.data) {
-          const rev = reviewResponse.data;
-          setRating(rev.rating || 5);
-
-          // Parse out selected tags if format is "[Tag1, Tag2] Comment"
-          let parsedComment = rev.comment || '';
-          if (parsedComment.startsWith('[')) {
-            const closingBracketIdx = parsedComment.indexOf(']');
-            if (closingBracketIdx !== -1) {
-              const tagsStr = parsedComment.substring(1, closingBracketIdx);
-              const tagsArray = tagsStr.split(',').map((t: string) => t.trim());
-              setSelectedTags(tagsArray);
-              parsedComment = parsedComment.substring(closingBracketIdx + 1).trim();
-            }
-          }
-          setComment(parsedComment);
-          setIsReviewed(true);
-        }
-      } catch (err) {
-        // If 404 (no review yet), do nothing. That is normal behavior
-        console.log('No existing review found in MongoDB for this ride yet.');
-      }
-    }
-
+    // Turn off loading immediately once core booking data is retrieved
     setLoading(false);
+
+    // 2. Fetch payment info asynchronously (non-blocking)
+    if (bookingData && bookingData.status === 'COMPLETED') {
+      api.get(`/api/payments/booking/${bookingId}`)
+        .then(paymentResponse => {
+          if (paymentResponse.data?.result) {
+            setPaymentInfo(paymentResponse.data.result);
+          }
+        })
+        .catch(() => {
+          console.log('No payment info found or payment not yet initiated.');
+        });
+    }
+
+    // 3. Fetch existing review for this ride asynchronously (non-blocking)
+    if (bookingData && bookingData.status === 'COMPLETED') {
+      api.get(`/api/reviews/ride/${bookingId}`)
+        .then(reviewResponse => {
+          if (reviewResponse.data) {
+            const rev = reviewResponse.data;
+            setRating(rev.rating || 5);
+
+            // Parse out selected tags if format is "[Tag1, Tag2] Comment"
+            let parsedComment = rev.comment || '';
+            if (parsedComment.startsWith('[')) {
+              const closingBracketIdx = parsedComment.indexOf(']');
+              if (closingBracketIdx !== -1) {
+                const tagsStr = parsedComment.substring(1, closingBracketIdx);
+                const tagsArray = tagsStr.split(',').map((t: string) => t.trim());
+                setSelectedTags(tagsArray);
+                parsedComment = parsedComment.substring(closingBracketIdx + 1).trim();
+              }
+            }
+            setComment(parsedComment);
+            setIsReviewed(true);
+          }
+        })
+        .catch(() => {
+          console.log('No existing review found in MongoDB for this ride yet.');
+        });
+    }
   };
 
   useEffect(() => {
@@ -271,7 +288,97 @@ export default function RideDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* Status Card */}
+        {/* ── Fare & Pricing Breakdown Card ────────────────────── */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Chi tiết giá</Text>
+
+          {/* Surge indicator */}
+          {booking.estimateSurge && booking.estimateSurge > 1.0 && (
+            <View style={[styles.surgeRow, { backgroundColor: getSurgeColor(booking.estimateSurge) + '12' }]}>
+              <View style={styles.surgeLeft}>
+                <Zap size={14} color={getSurgeColor(booking.estimateSurge)} />
+                <Text style={[styles.surgeRowLabel, { color: getSurgeColor(booking.estimateSurge) }]}>
+                  Cước cao điểm
+                </Text>
+              </View>
+              <Text style={[styles.surgeRowValue, { color: getSurgeColor(booking.estimateSurge) }]}>
+                ×{booking.estimateSurge.toFixed(1)} {getSurgeLabel(booking.estimateSurge)}
+              </Text>
+            </View>
+          )}
+
+          {/* Route info */}
+          {(booking.distanceKm || booking.durationMinutes) && (
+            <View style={styles.routeInfoRow}>
+              <View style={styles.routeInfoItem}>
+                <Route size={13} color="#6366F1" />
+                <Text style={styles.routeInfoText}>{booking.distanceKm ? `${parseFloat(booking.distanceKm).toFixed(1)} km` : '—'}</Text>
+              </View>
+              <View style={styles.routeInfoItem}>
+                <Clock size={13} color="#6366F1" />
+                <Text style={styles.routeInfoText}>{booking.durationMinutes ? `~${booking.durationMinutes} phút` : '—'}</Text>
+              </View>
+            </View>
+          )}
+
+          {/* Price breakdown rows */}
+          {[
+            booking.baseFare     && { 
+              label: booking.promoCode ? 'Giá cước gốc' : 'Cước cơ bản', 
+              value: booking.baseFare 
+            },
+            booking.distanceFare && { label: 'Cước theo km',   value: booking.distanceFare },
+            booking.timeFare     && { label: 'Cước theo phút', value: booking.timeFare },
+            booking.platformFee  && { label: 'Phí nền tảng',   value: booking.platformFee },
+            booking.zoneFee      && booking.zoneFee > 0 && { label: 'Phí khu vực',   value: booking.zoneFee },
+            booking.airportFee   && booking.airportFee > 0 && { label: 'Phí sân bay',  value: booking.airportFee },
+            booking.tollFee      && booking.tollFee > 0 && { label: 'Phí cầu đường', value: booking.tollFee },
+            booking.promoCode && booking.discountAmount > 0 ? {
+              label: `Mã ưu đãi (${booking.promoCode})`,
+              value: -booking.discountAmount
+            } : (booking.discountAmount && booking.discountAmount > 0 ? {
+              label: 'Giảm giá',
+              value: -booking.discountAmount
+            } : null),
+          ].filter(Boolean).map((row: any, idx: number) => (
+            <View key={idx} style={styles.priceRow}>
+              <Text style={styles.priceLabel}>{row.label}</Text>
+              <Text style={[styles.priceValue, row.value < 0 && { color: '#10B981', fontWeight: '800' }]}>
+                {row.value < 0 ? `-${formatVND(Math.abs(row.value))}` : formatVND(row.value)}
+              </Text>
+            </View>
+          ))}
+
+          {/* Fallback indicator */}
+          {booking.distanceSource === 'fallback' && (
+            <View style={styles.fallbackNote}>
+              <Info size={12} color="#F59E0B" />
+              <Text style={styles.fallbackNoteText}>Khoảng cách ước tính (Mapbox không khả dụng)</Text>
+            </View>
+          )}
+
+          <View style={styles.priceDivider} />
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Tổng thanh toán</Text>
+            <Text style={styles.totalAmount}>
+              {formatVND(booking.estimatedFare ?? booking.finalFare ?? booking.amount ?? 0)}
+            </Text>
+          </View>
+
+          {/* Quote info for disputes */}
+          {(booking.quoteId || booking.estimateId) && (
+            <View style={styles.quoteInfo}>
+              {booking.quoteId && (
+                <Text style={styles.quoteIdText}>Mã báo giá: {booking.quoteId}</Text>
+              )}
+              {booking.estimateId && booking.estimateId !== 'fallback' && (
+                <Text style={styles.estimateIdText}>ID ước tính: {booking.estimateId.substring(0, 16)}...</Text>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* ── Status Card ──────────────────────────────────────── */}
         <View style={styles.card}>
           <View style={styles.statusRow}>
             <Text style={styles.statusLabel}>Trạng thái</Text>
@@ -283,7 +390,7 @@ export default function RideDetailScreen() {
           </View>
           <View style={styles.fareContainer}>
             <Text style={styles.fareLabel}>Tổng thanh toán</Text>
-            <Text style={styles.fareAmount}>{booking.estimatedFare?.toLocaleString()}đ</Text>
+            <Text style={styles.fareAmount}>{formatVND(booking.estimatedFare ?? booking.finalFare ?? booking.amount ?? 0)}</Text>
           </View>
         </View>
 
@@ -901,10 +1008,104 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingHorizontal: 32,
   },
-  emptyText: {
-    marginTop: 16,
-    fontSize: 15,
+  // ── Pricing breakdown styles ────────────────────────────────
+  surgeRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 10,
+    marginBottom: 10,
+  },
+  surgeLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  surgeRowLabel: {
+    fontSize: 13,
+    fontWeight: '600',
+  },
+  surgeRowValue: {
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  routeInfoRow: {
+    flexDirection: 'row',
+    gap: 20,
+    marginBottom: 12,
+  },
+  routeInfoItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+  },
+  routeInfoText: {
+    fontSize: 13,
+    fontWeight: '600',
+    color: '#374151',
+  },
+  priceRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginVertical: 4,
+  },
+  priceLabel: {
+    fontSize: 14,
     color: '#6B7280',
-    textAlign: 'center',
+  },
+  priceValue: {
+    fontSize: 14,
+    fontWeight: '500',
+    color: '#374151',
+  },
+  priceDivider: {
+    height: 1,
+    backgroundColor: '#F3F4F6',
+    marginVertical: 10,
+  },
+  totalRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+  },
+  totalLabel: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#111827',
+  },
+  totalAmount: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#6366F1',
+  },
+  fallbackNote: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    marginTop: 8,
+  },
+  fallbackNoteText: {
+    fontSize: 11,
+    color: '#F59E0B',
+  },
+  quoteInfo: {
+    marginTop: 10,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: '#F3F4F6',
+    gap: 2,
+  },
+  quoteIdText: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontFamily: 'monospace',
+  },
+  estimateIdText: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    fontFamily: 'monospace',
   },
 });

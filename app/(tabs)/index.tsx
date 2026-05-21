@@ -1,7 +1,7 @@
-import React from 'react';
-import { StyleSheet, View, Text, ScrollView, TextInput, TouchableOpacity, Image } from 'react-native';
+import React, { useState, useEffect, useRef } from 'react';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, Car, Bike, Utensils, ShoppingBag, Bell, Menu, MapPin, ChevronRight, History } from 'lucide-react-native';
+import { Search, Car, Bell, MapPin, ChevronRight, History, Sparkles, MessageSquare } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
@@ -32,11 +32,33 @@ const translateNotificationMessage = (message: string) => {
   return message;
 };
 
+const BANNER_PROMOS = [
+  { id: '1', title: 'Ưu đãi CABNEW 🎉', desc: 'Giảm ngay 30k cho bạn mới!', code: 'CABNEW', bg: '#4F46E5' },
+  { id: '2', title: 'Ngày Nắng Rạng Rỡ ☀️', desc: 'CAB Ngày nắng giảm 15k mọi chuyến!', code: 'CABSUMMER', bg: '#DB2777' },
+  { id: '3', title: 'Đẳng Cấp Thượng Lưu 👑', desc: 'CAB VIP tri ân giảm tới 50k!', code: 'CABVIP', bg: '#7C3AED' }
+];
+
+const AI_SUGGESTIONS = [
+  '🗣️ Đặt xe bằng giọng nói rảnh tay?',
+  '📍 Tìm đường ngắn nhất đến Landmark 81?',
+  '☕ Gợi ý quán cafe đẹp tại Gò Vấp?',
+  '⛈️ Đi tránh kẹt xe giờ cao điểm thế nào?'
+];
+
 export default function HomeScreen() {
   const router = useRouter();
   const { socket, unreadCount, setUnreadCount } = useSocket();
-  const [latestNotification, setLatestNotification] = React.useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
-  const [recentBookings, setRecentBookings] = React.useState<any[]>([]);
+  const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
+  const [recentBookings, setRecentBookings] = useState<any[]>([]);
+
+  // Promo Carousel State & Animation
+  const [currentPromoIdx, setCurrentPromoIdx] = useState(0);
+  const fadeAnim = useRef(new Animated.Value(1)).current;
+
+  // AI Suggestion State & Floating Animations
+  const [suggestionIdx, setSuggestionIdx] = useState(0);
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const bubbleYAnim = useRef(new Animated.Value(0)).current;
 
   // Automatically refresh when Home tab comes into focus
   useFocusEffect(
@@ -72,7 +94,7 @@ export default function HomeScreen() {
     }
   };
 
-  React.useEffect(() => {
+  useEffect(() => {
     fetchDashboardData();
 
     if (socket) {
@@ -80,8 +102,66 @@ export default function HomeScreen() {
         setLatestNotification(translateNotificationMessage(data.message || 'Cập nhật mới cho chuyến đi của bạn!'));
       });
     }
+
+    // Auto Play Promos Banner (Fade in/out)
+    const bannerTimer = setInterval(() => {
+      Animated.timing(fadeAnim, {
+        toValue: 0,
+        duration: 400,
+        useNativeDriver: true,
+      }).start(() => {
+        setCurrentPromoIdx((prev) => (prev + 1) % BANNER_PROMOS.length);
+        Animated.timing(fadeAnim, {
+          toValue: 1,
+          duration: 400,
+          useNativeDriver: true,
+        }).start();
+      });
+    }, 4500);
+
+    // Auto Switch AI Suggestion Tooltip
+    const suggestionTimer = setInterval(() => {
+      setSuggestionIdx((prev) => (prev + 1) % AI_SUGGESTIONS.length);
+    }, 5000);
+
+    // Floating AI Bubble Idle Animation (Looping Pulsing & Bobbing)
+    Animated.loop(
+      Animated.parallel([
+        Animated.sequence([
+          Animated.timing(pulseAnim, {
+            toValue: 1.1,
+            duration: 1500,
+            easing: Easing.easeInOut,
+            useNativeDriver: true,
+          }),
+          Animated.timing(pulseAnim, {
+            toValue: 1.0,
+            duration: 1500,
+            easing: Easing.easeInOut,
+            useNativeDriver: true,
+          }),
+        ]),
+        Animated.sequence([
+          Animated.timing(bubbleYAnim, {
+            toValue: -8,
+            duration: 1500,
+            easing: Easing.easeInOut,
+            useNativeDriver: true,
+          }),
+          Animated.timing(bubbleYAnim, {
+            toValue: 0,
+            duration: 1500,
+            easing: Easing.easeInOut,
+            useNativeDriver: true,
+          }),
+        ]),
+      ])
+    ).start();
+
     return () => {
       if (socket) socket.off('new_notification');
+      clearInterval(bannerTimer);
+      clearInterval(suggestionTimer);
     };
   }, [socket]);
 
@@ -99,145 +179,181 @@ export default function HomeScreen() {
     }
   };
 
+  const currentPromo = BANNER_PROMOS[currentPromoIdx];
+
   return (
     <SafeAreaView style={styles.container}>
-      <ScrollView showsVerticalScrollIndicator={false}>
-        {/* Header */}
-        <View style={styles.header}>
-          <View style={styles.searchContainer}>
-            <Search size={20} color={Colors.light.icon} style={styles.searchIcon} />
-            <TextInput
-              placeholder="Bạn muốn đi đâu?"
-              style={styles.searchInput}
-              placeholderTextColor={Colors.light.icon}
-              onFocus={() => router.push('/booking')}
-            />
-          </View>
-          <TouchableOpacity
-            style={styles.iconButton}
-            onPress={() => {
-              setUnreadCount(0);
-              router.push('/modal');
-            }}
-          >
-            <View>
-              <Bell size={24} color={Colors.light.text} />
-              {unreadCount > 0 && <View style={styles.badge} />}
-            </View>
-          </TouchableOpacity>
-        </View>
- 
-        {/* Services Grid */}
-        <View style={[styles.servicesGrid, { justifyContent: 'flex-start' }]}>
-          <ServiceItem
-            icon={<Car size={32} color={Colors.light.primary} />}
-            label="Đặt xe"
-            onPress={() => router.push('/(ride)/booking')}
-          />
-          <ServiceItem
-            icon={<Text style={{ fontSize: 30 }}>🤖</Text>}
-            label="Hỏi AI"
-            onPress={() => router.push('/(ai)/chat')}
-          />
-        </View>
- 
-        {/* Promo Banner Mock */}
-        <View style={styles.promoBanner}>
-          <View style={styles.promoTextContainer}>
-            <Text style={styles.promoTitle}>Giảm 50% cho chuyến đầu</Text>
-            <Text style={styles.promoSubtitle}>Nhập mã: NEWCAB2024</Text>
-            <TouchableOpacity style={styles.promoButton}>
-              <Text style={styles.promoButtonText}>Nhận Ngay</Text>
+      <View style={{ flex: 1 }}>
+        <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity 
+              style={styles.searchContainer}
+              onPress={() => router.push('/(ride)/booking')}
+              activeOpacity={0.8}
+            >
+              <Search size={20} color={Colors.light.icon} style={styles.searchIcon} />
+              <Text style={[styles.searchInput, { color: Colors.light.icon }]}>
+                Bạn muốn đi đâu?
+              </Text>
             </TouchableOpacity>
-          </View>
-          <View style={styles.promoImagePlaceholder} />
-        </View>
- 
-        {/* Recent Destinations */}
-        <View style={styles.section}>
-          <View style={styles.sectionHeader}>
-            <Text style={styles.sectionTitle}>Điểm đến gần đây</Text>
-            <TouchableOpacity>
-              <Text style={styles.seeAll}>Xem tất cả</Text>
-            </TouchableOpacity>
-          </View>
- 
-          {recentBookings.slice(0, 3).map((booking, index) => (
-            <DestinationItem
-              key={booking.id || index}
-              title={booking.dropoffLocation.split(',')[0]} // Show only first part of address
-              subtitle={booking.dropoffLocation}
-            />
-          ))}
-          {recentBookings.length === 0 && (
-            <Text style={{ color: '#999', marginTop: 10 }}>Chưa có điểm đến gần đây.</Text>
-          )}
-        </View>
- 
-        {/* Notifications Section */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Thông báo gần đây</Text>
-          <View style={styles.notificationCard}>
-            <Bell size={20} color={Colors.light.primary} />
-            <Text style={styles.notificationText}>
-              {latestNotification}
-            </Text>
-          </View>
-        </View>
- 
-        {/* Activity Feed */}
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Hoạt động của bạn</Text>
-          {recentBookings.length > 0 ? (
-            <TouchableOpacity onPress={() => router.push('/explore')} style={styles.activityCard}>
-              <History size={24} color={Colors.light.primary} />
-              <View style={styles.activityInfo}>
-                <Text style={styles.activityTitle}>Chuyến đi {getStatusInVietnamese(recentBookings[0].status)}</Text>
-                <Text style={styles.activityTime}>{new Date(recentBookings[0].createdAt).toLocaleString('vi-VN')}</Text>
+            <TouchableOpacity
+              style={styles.iconButton}
+              onPress={() => {
+                setUnreadCount(0);
+                router.push('/modal');
+              }}
+            >
+              <View>
+                <Bell size={24} color={Colors.light.text} />
+                {unreadCount > 0 && <View style={styles.badge} />}
               </View>
-              <Text style={styles.activityPrice}>{recentBookings[0].estimatedFare?.toLocaleString()}đ</Text>
             </TouchableOpacity>
-          ) : (
-            <View style={[styles.activityCard, { justifyContent: 'center' }]}>
-              <Text style={{ color: '#999' }}>Chưa có hoạt động nào gần đây</Text>
+          </View>
+    
+          {/* ── NÚT ĐẶT XE KHỔNG LỒ (HERO ORDER BUTTON) ── */}
+          <View style={styles.heroSection}>
+            <TouchableOpacity
+              style={styles.heroOrderCard}
+              onPress={() => router.push('/(ride)/booking')}
+              activeOpacity={0.9}
+            >
+              <View style={styles.heroCardContent}>
+                <View style={styles.heroIconCircle}>
+                  <Car size={48} color="#FFF" />
+                </View>
+                <View style={styles.heroTextContainer}>
+                  <Text style={styles.heroTitle}>ĐẶT XE NGAY BÂY GIỜ</Text>
+                  <Text style={styles.heroSubtitle}>Trải nghiệm hành trình 5 sao cùng CAB</Text>
+                </View>
+                <View style={styles.heroActionBadge}>
+                  <Text style={styles.heroActionText}>Bấm để đi ➔</Text>
+                </View>
+              </View>
+            </TouchableOpacity>
+          </View>
+    
+          {/* ── ANIMATED PROMO CAROUSEL BANNER ── */}
+          <Animated.View style={[styles.promoBanner, { backgroundColor: currentPromo.bg, opacity: fadeAnim }]}>
+            <View style={styles.promoTextContainer}>
+              <Text style={styles.promoTitle}>{currentPromo.title}</Text>
+              <Text style={styles.promoDesc}>{currentPromo.desc}</Text>
+              <Text style={styles.promoCode}>Mã: {currentPromo.code}</Text>
             </View>
-          )}
-        </View>
-
-        <View style={{ height: 100 }} />
-      </ScrollView>
+            <TouchableOpacity 
+              style={styles.promoButton}
+              onPress={() => router.push('/(ride)/booking')}
+            >
+              <Text style={[styles.promoButtonText, { color: currentPromo.bg }]}>Đặt Ngay</Text>
+            </TouchableOpacity>
+          </Animated.View>
+    
+          {/* Recent Destinations */}
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Điểm đến gần đây</Text>
+              <TouchableOpacity onPress={() => router.push('/explore')}>
+                <Text style={styles.seeAll}>Xem tất cả</Text>
+              </TouchableOpacity>
+            </View>
+    
+            {recentBookings.slice(0, 3).map((booking, index) => (
+              <TouchableOpacity 
+                key={booking.id || index} 
+                style={styles.destinationItem}
+                onPress={() => router.push('/(ride)/booking')}
+              >
+                <MapPin size={20} color={Colors.light.icon} />
+                <View style={styles.destinationText}>
+                  <Text style={styles.destinationTitle} numberOfLines={1}>
+                    {booking.dropoffLocation.split(',')[0]}
+                  </Text>
+                  <Text style={styles.destinationSubtitle} numberOfLines={1}>
+                    {booking.dropoffLocation}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color={Colors.light.icon} />
+              </TouchableOpacity>
+            ))}
+            {recentBookings.length === 0 && (
+              <Text style={{ color: '#999', marginTop: 10 }}>Chưa có điểm đến gần đây.</Text>
+            )}
+          </View>
+    
+          {/* Notifications Section */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Thông báo gần đây</Text>
+            <View style={styles.notificationCard}>
+              <Bell size={20} color={Colors.light.primary} />
+              <Text style={styles.notificationText}>
+                {latestNotification}
+              </Text>
+            </View>
+          </View>
+    
+          {/* Activity Feed */}
+          <View style={styles.section}>
+            <Text style={styles.sectionTitle}>Hoạt động của bạn</Text>
+            {recentBookings.length > 0 ? (
+              <TouchableOpacity onPress={() => router.push('/explore')} style={styles.activityCard}>
+                <History size={24} color={Colors.light.primary} />
+                <View style={styles.activityInfo}>
+                  <Text style={styles.activityTitle}>Chuyến đi {getStatusInVietnamese(recentBookings[0].status)}</Text>
+                  <Text style={styles.activityTime}>{new Date(recentBookings[0].createdAt).toLocaleString('vi-VN')}</Text>
+                </View>
+                <Text style={styles.activityPrice}>{recentBookings[0].estimatedFare?.toLocaleString()}đ</Text>
+              </TouchableOpacity>
+            ) : (
+              <View style={[styles.activityCard, { justifyContent: 'center' }]}>
+                <Text style={{ color: '#999' }}>Chưa có hoạt động nào gần đây</Text>
+              </View>
+            )}
+          </View>
+  
+          <View style={{ height: 120 }} />
+        </ScrollView>
+  
+        {/* ── FLOATING AI AGENT BUBBLE WITH SPEECH TOOLTIP ── */}
+        <Animated.View style={[
+          styles.floatingContainer,
+          { transform: [{ translateY: bubbleYAnim }] }
+        ]}>
+          {/* Speech Tooltip / Suggestion Bubble */}
+          <View style={styles.speechBubble}>
+            <Text style={styles.speechText}>{AI_SUGGESTIONS[suggestionIdx]}</Text>
+            <View style={styles.speechArrow} />
+          </View>
+  
+          {/* Pulse Ripple Background */}
+          <Animated.View style={[
+            styles.ripple,
+            { transform: [{ scale: pulseAnim }], opacity: pulseAnim.interpolate({
+              inputRange: [1, 1.1],
+              outputRange: [0.6, 0]
+            }) }
+          ]} />
+  
+          {/* Floating Bubble Button */}
+          <TouchableOpacity
+            style={styles.floatingBubble}
+            onPress={() => router.push('/(ai)/chat')}
+            activeOpacity={0.8}
+          >
+            <Sparkles size={24} color="#FFF" />
+          </TouchableOpacity>
+        </Animated.View>
+      </View>
     </SafeAreaView>
-  );
-}
-
-function ServiceItem({ icon, label, onPress }: { icon: React.ReactNode, label: string, onPress?: () => void }) {
-  return (
-    <TouchableOpacity style={styles.serviceItem} onPress={onPress}>
-      <View style={styles.iconCircle}>
-        {icon}
-      </View>
-      <Text style={styles.serviceLabel}>{label}</Text>
-    </TouchableOpacity>
-  );
-}
-
-function DestinationItem({ title, subtitle }: { title: string, subtitle: string }) {
-  return (
-    <TouchableOpacity style={styles.destinationItem}>
-      <MapPin size={20} color={Colors.light.icon} />
-      <View style={styles.destinationText}>
-        <Text style={styles.destinationTitle}>{title}</Text>
-        <Text style={styles.destinationSubtitle}>{subtitle}</Text>
-      </View>
-      <ChevronRight size={18} color={Colors.light.icon} />
-    </TouchableOpacity>
   );
 }
 
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    backgroundColor: '#fff',
+    backgroundColor: '#FAF9FC', // Soft, warm background
+  },
+  scrollContent: {
+    paddingBottom: 20,
   },
   header: {
     flexDirection: 'row',
@@ -249,11 +365,18 @@ const styles = StyleSheet.create({
   searchContainer: {
     flex: 1,
     flexDirection: 'row',
-    backgroundColor: '#F2F2F2',
-    borderRadius: 12,
+    backgroundColor: '#FFF',
+    borderRadius: 16,
     paddingHorizontal: 15,
-    height: 48,
+    height: 52,
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
   },
   searchIcon: {
     marginRight: 10,
@@ -264,62 +387,104 @@ const styles = StyleSheet.create({
     color: '#000',
   },
   iconButton: {
-    width: 40,
-    height: 40,
+    width: 44,
+    height: 44,
+    backgroundColor: '#FFF',
+    borderRadius: 14,
     justifyContent: 'center',
     alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
   },
   badge: {
     position: 'absolute',
     top: -2,
     right: -2,
     backgroundColor: '#EF4444',
-    width: 12,
-    height: 12,
-    borderRadius: 6,
-    borderWidth: 2,
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+    borderWidth: 1.5,
     borderColor: '#fff',
   },
-  servicesGrid: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
+  
+  // ── HERO ORDER BUTTON STYLE ──
+  heroSection: {
     paddingHorizontal: 20,
     marginTop: 20,
   },
-  serviceItem: {
-    alignItems: 'center',
-    gap: 8,
+  heroOrderCard: {
+    backgroundColor: '#4F46E5', // Deep Indigo Royal Accent
+    borderRadius: 24,
+    padding: 24,
+    shadowColor: '#4F46E5',
+    shadowOffset: { width: 0, height: 10 },
+    shadowOpacity: 0.3,
+    shadowRadius: 16,
+    elevation: 8,
   },
-  iconCircle: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: '#F8F8F8',
+  heroCardContent: {
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 15,
+  },
+  heroIconCircle: {
+    width: 80,
+    height: 80,
+    borderRadius: 40,
+    backgroundColor: '#FFFFFF22',
     justifyContent: 'center',
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: '#EAEAEA',
+    borderWidth: 1.5,
+    borderColor: '#FFFFFF44',
   },
-  serviceLabel: {
-    fontSize: 14,
+  heroTextContainer: {
+    alignItems: 'center',
+  },
+  heroTitle: {
+    color: '#FFF',
+    fontSize: 22,
+    fontWeight: '900',
+    letterSpacing: 0.5,
+    textAlign: 'center',
+  },
+  heroSubtitle: {
+    color: '#E0E7FF',
+    fontSize: 13,
+    marginTop: 4,
     fontWeight: '500',
-    color: '#333',
+    textAlign: 'center',
   },
+  heroActionBadge: {
+    backgroundColor: '#FFD700', // Sparkling yellow CTA
+    paddingHorizontal: 20,
+    paddingVertical: 10,
+    borderRadius: 20,
+    marginTop: 4,
+    shadowColor: '#FFD700',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.2,
+    shadowRadius: 6,
+  },
+  heroActionText: {
+    color: '#1E1B4B',
+    fontSize: 14,
+    fontWeight: '800',
+  },
+
+  // ── ANIMATED PROMO BANNER STYLE ──
   promoBanner: {
     marginHorizontal: 20,
-    marginTop: 25,
-    backgroundColor: '#6366F1',
+    marginTop: 24,
     borderRadius: 20,
     padding: 20,
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    overflow: 'hidden',
-    shadowColor: '#6366F1',
-    shadowOffset: { width: 0, height: 8 },
-    shadowOpacity: 0.2,
-    shadowRadius: 12,
-    elevation: 6,
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.15,
+    shadowRadius: 8,
+    elevation: 4,
   },
   promoTextContainer: {
     flex: 1,
@@ -329,103 +494,110 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: 'bold',
   },
-  promoSubtitle: {
-    color: '#E0FFEB',
-    fontSize: 14,
+  promoDesc: {
+    color: '#F3F4F6',
+    fontSize: 13,
+    marginTop: 4,
+    fontWeight: '500',
+  },
+  promoCode: {
+    color: '#FFD700',
+    fontSize: 12,
+    fontWeight: '700',
     marginTop: 4,
   },
   promoButton: {
     backgroundColor: '#fff',
-    paddingHorizontal: 15,
-    paddingVertical: 8,
-    borderRadius: 8,
-    marginTop: 12,
-    alignSelf: 'flex-start',
+    paddingHorizontal: 16,
+    paddingVertical: 10,
+    borderRadius: 12,
   },
   promoButtonText: {
-    color: '#6366F1',
     fontWeight: '800',
     fontSize: 12,
   },
-  promoImagePlaceholder: {
-    width: 80,
-    height: 80,
-    backgroundColor: '#E0FFEB33',
-    borderRadius: 40,
-  },
+
   section: {
-    marginTop: 30,
+    marginTop: 28,
     paddingHorizontal: 20,
   },
   sectionHeader: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 15,
+    marginBottom: 12,
   },
   sectionTitle: {
-    fontSize: 18,
-    fontWeight: 'bold',
-    color: '#111',
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#1F2937',
   },
   seeAll: {
-    color: '#6366F1',
+    color: '#4F46E5',
     fontWeight: '700',
+    fontSize: 14,
   },
   destinationItem: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 15,
+    paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#F2F2F2',
+    borderBottomColor: '#F3F4F6',
   },
   destinationText: {
     flex: 1,
     marginLeft: 15,
   },
   destinationTitle: {
-    fontSize: 16,
+    fontSize: 15,
     fontWeight: '600',
-    color: '#111',
+    color: '#111827',
   },
   destinationSubtitle: {
-    fontSize: 14,
-    color: '#666',
+    fontSize: 13,
+    color: '#6B7280',
     marginTop: 2,
   },
   activityCard: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#F9F9F9',
-    padding: 15,
-    borderRadius: 12,
-    marginTop: 10,
+    backgroundColor: '#FFF',
+    padding: 16,
+    borderRadius: 16,
+    marginTop: 8,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 1 },
+    shadowOpacity: 0.02,
+    shadowRadius: 4,
   },
   activityInfo: {
     flex: 1,
     marginLeft: 15,
   },
   activityTitle: {
-    fontSize: 15,
+    fontSize: 14,
     fontWeight: '600',
+    color: '#1F2937',
   },
   activityTime: {
-    fontSize: 13,
-    color: '#666',
+    fontSize: 12,
+    color: '#6B7280',
     marginTop: 2,
   },
   activityPrice: {
-    fontSize: 15,
-    fontWeight: 'bold',
-    color: '#111',
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#111827',
   },
   notificationCard: {
     flexDirection: 'row',
     alignItems: 'center',
     backgroundColor: '#EEF2FF',
-    padding: 15,
+    padding: 16,
     borderRadius: 16,
-    marginTop: 10,
+    marginTop: 8,
     gap: 12,
     borderWidth: 1,
     borderColor: '#E0E7FF',
@@ -435,5 +607,69 @@ const styles = StyleSheet.create({
     color: '#3730A3',
     flex: 1,
     fontWeight: '500',
+    lineHeight: 20,
+  },
+
+  // ── FLOATING AI AGENT BUBBLE STYLE ──
+  floatingContainer: {
+    position: 'absolute',
+    bottom: 30,
+    right: 20,
+    alignItems: 'flex-end',
+    zIndex: 999,
+  },
+  speechBubble: {
+    backgroundColor: '#1E1B4B', // Velvet dark deep space blue
+    borderRadius: 14,
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    marginBottom: 8,
+    maxWidth: 200,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 6,
+    elevation: 3,
+  },
+  speechText: {
+    color: '#FFF',
+    fontSize: 11,
+    fontWeight: '700',
+    textAlign: 'center',
+  },
+  speechArrow: {
+    position: 'absolute',
+    bottom: -6,
+    right: 20,
+    width: 0,
+    height: 0,
+    borderLeftWidth: 6,
+    borderLeftColor: 'transparent',
+    borderRightWidth: 6,
+    borderRightColor: 'transparent',
+    borderTopWidth: 6,
+    borderTopColor: '#1E1B4B',
+  },
+  floatingBubble: {
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#7C3AED', // Electric violet sparkle
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#7C3AED',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.4,
+    shadowRadius: 10,
+    elevation: 6,
+  },
+  ripple: {
+    position: 'absolute',
+    bottom: 0,
+    right: 0,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
+    backgroundColor: '#7C3AED',
   }
 });
