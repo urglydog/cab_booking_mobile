@@ -14,16 +14,57 @@ const PROMO_CODES = [
   { id: 'promo-3', code: 'CABVIP', title: 'CAB Tri ân VIP', discount: 50000, description: 'Giảm trực tiếp 50k' }
 ];
 
+const MOCK_POPULAR_PLACES = [
+  {
+    text: 'Trường Đại học Công nghiệp TP.HCM (IUH)',
+    place_name: '12 Nguyễn Văn Bảo, Phường 4, Gò Vấp, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.6871, 10.8222] }
+  },
+  {
+    text: 'Sân bay Quốc tế Tân Sơn Nhất (SGN)',
+    place_name: 'Trường Sơn, Phường 2, Tân Bình, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.6625, 10.8184] }
+  },
+  {
+    text: 'Chợ Bến Thành',
+    place_name: 'Đường Lê Lợi, Phường Bến Thành, Quận 1, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.6990, 10.7725] }
+  },
+  {
+    text: 'Dinh Độc Lập',
+    place_name: '135 Nam Kỳ Khởi Nghĩa, Phường Bến Thành, Quận 1, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.6953, 10.7769] }
+  },
+  {
+    text: 'Nhà thờ Đức Bà Sài Gòn',
+    place_name: '01 Công xã Paris, Phường Bến Nghé, Quận 1, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.6980, 10.7798] }
+  },
+  {
+    text: 'Landmark 81',
+    place_name: '720A Điện Biên Phủ, Phường 22, Bình Thạnh, Thành phố Hồ Chí Minh',
+    geometry: { coordinates: [106.7218, 10.7948] }
+  }
+];
+
 export default function BookingScreen() {
   const router = useRouter();
   const [pickup, setPickup] = useState('12 Nguyen Van Bao, Go Vap');
+  const [pickupCoords, setPickupCoords] = useState({ latitude: 10.822, longitude: 106.687 });
   const [dropoff, setDropoff] = useState('');
+  const [dropoffCoords, setDropoffCoords] = useState<{ latitude: number, longitude: number } | null>(null);
+
   const [vehicleType, setVehicleType] = useState('CAR');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
   const [loading, setLoading] = useState(false);
   const [carPrice, setCarPrice] = useState<number | null>(null);
   const [bikePrice, setBikePrice] = useState<number | null>(null);
   const [selectedPromo, setSelectedPromo] = useState<any>(null);
+
+  // Autocomplete states
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [activeSearch, setActiveSearch] = useState<'pickup' | 'dropoff' | null>(null);
+  const [searching, setSearching] = useState(false);
 
   // Map selected vehicle type to API value
   const getVehicleTypeForApi = (type: string) => {
@@ -34,22 +75,94 @@ export default function BookingScreen() {
     }
   };
 
+  // Fetch address suggestions from Mapbox Geocoding API + Local popular places
+  const handleAddressSearch = async (text: string, type: 'pickup' | 'dropoff') => {
+    if (type === 'pickup') {
+      setPickup(text);
+    } else {
+      setDropoff(text);
+    }
+
+    if (text.trim().length < 2) {
+      setSuggestions([]);
+      return;
+    }
+
+    setSearching(true);
+    try {
+      // 1. Search local popular places first (handles Vietnamese abbreviations like IUH, SGN...)
+      const queryLower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+      const localMatches = MOCK_POPULAR_PLACES.filter(place => {
+        const placeTextNorm = place.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        const placeNameNorm = place.place_name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+        return placeTextNorm.includes(queryLower) || placeNameNorm.includes(queryLower);
+      });
+
+      // 2. Fetch from Mapbox API for general addresses
+      const MAPBOX_KEY = process.env.EXPO_PUBLIC_MAPBOX_KEY || '';
+      const response = await fetch(
+        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_KEY}&country=vn&limit=5&language=vi`
+      );
+      const data = await response.json();
+      const apiFeatures = data.features || [];
+
+      // 3. Combine both lists, keeping local matches on top
+      const combined = [...localMatches];
+      
+      apiFeatures.forEach((feat: any) => {
+        const isDuplicate = localMatches.some(local => 
+          local.place_name.toLowerCase().includes(feat.text.toLowerCase()) || 
+          feat.place_name.toLowerCase().includes(local.place_name.toLowerCase())
+        );
+        if (!isDuplicate) {
+          combined.push(feat);
+        }
+      });
+
+      setSuggestions(combined);
+    } catch (e) {
+      console.error('Failed to geocode address via Mapbox:', e);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  const handleSelectSuggestion = (item: any) => {
+    // Mapbox geometry.coordinates is [longitude, latitude]
+    const coords = {
+      latitude: item.geometry.coordinates[1],
+      longitude: item.geometry.coordinates[0]
+    };
+    
+    if (activeSearch === 'pickup') {
+      setPickup(item.place_name);
+      setPickupCoords(coords);
+    } else if (activeSearch === 'dropoff') {
+      setDropoff(item.place_name);
+      setDropoffCoords(coords);
+    }
+    
+    setSuggestions([]);
+    setActiveSearch(null);
+  };
+
   React.useEffect(() => {
     const fetchPrices = async () => {
+      if (!pickupCoords || !dropoffCoords) return;
       try {
         const [carRes, bikeRes] = await Promise.all([
           api.post('/api/pricing/estimate', {
-            pickupLat: 10.8231,
-            pickupLng: 106.6631,
-            dropoffLat: 10.8331,
-            dropoffLng: 106.6731,
+            pickupLat: pickupCoords.latitude,
+            pickupLng: pickupCoords.longitude,
+            dropoffLat: dropoffCoords.latitude,
+            dropoffLng: dropoffCoords.longitude,
             vehicleType: 'ECONOMY'
           }),
           api.post('/api/pricing/estimate', {
-            pickupLat: 10.8231,
-            pickupLng: 106.6631,
-            dropoffLat: 10.8331,
-            dropoffLng: 106.6731,
+            pickupLat: pickupCoords.latitude,
+            pickupLng: pickupCoords.longitude,
+            dropoffLat: dropoffCoords.latitude,
+            dropoffLng: dropoffCoords.longitude,
             vehicleType: 'ECONOMY'
           })
         ]);
@@ -57,12 +170,18 @@ export default function BookingScreen() {
         setBikePrice(bikeRes.data?.totalFare || 25000);
       } catch (e) {
         console.error('Failed to fetch pricing:', e);
-        setCarPrice(55000);
-        setBikePrice(25000);
+        // Fallback pricing based on dynamic coordinates distance
+        const latDiff = Math.abs(pickupCoords.latitude - dropoffCoords.latitude);
+        const lngDiff = Math.abs(pickupCoords.longitude - dropoffCoords.longitude);
+        const distanceKm = (latDiff + lngDiff) * 111; // Rough km estimate
+        const calculatedCar = Math.max(30000, Math.round(20000 + distanceKm * 12000));
+        const calculatedBike = Math.max(15000, Math.round(10000 + distanceKm * 5000));
+        setCarPrice(calculatedCar);
+        setBikePrice(calculatedBike);
       }
     };
     fetchPrices();
-  }, []);
+  }, [pickupCoords, dropoffCoords]);
 
   const handleBooking = async () => {
     if (!pickup || !dropoff) {
@@ -99,10 +218,10 @@ export default function BookingScreen() {
         customerId,
         pickupLocation: pickup,
         dropoffLocation: dropoff,
-        pickupLat: 10.8231,
-        pickupLng: 106.6631,
-        dropoffLat: 10.8331,
-        dropoffLng: 106.6731,
+        pickupLat: pickupCoords.latitude,
+        pickupLng: pickupCoords.longitude,
+        dropoffLat: dropoffCoords ? dropoffCoords.latitude : 10.8331,
+        dropoffLng: dropoffCoords ? dropoffCoords.longitude : 106.6731,
         vehicleType: getVehicleTypeForApi(vehicleType),
         paymentMethod,
         estimatedFare: finalFare,
@@ -167,25 +286,25 @@ export default function BookingScreen() {
         <View style={styles.mapContainer}>
           <MapView
             style={styles.map}
-            initialRegion={{
-              latitude: 10.822,
-              longitude: 106.687,
-              latitudeDelta: 0.04,
-              longitudeDelta: 0.04,
+            region={{
+              latitude: dropoffCoords ? (pickupCoords.latitude + dropoffCoords.latitude) / 2 : pickupCoords.latitude,
+              longitude: dropoffCoords ? (pickupCoords.longitude + dropoffCoords.longitude) / 2 : pickupCoords.longitude,
+              latitudeDelta: dropoffCoords ? Math.abs(pickupCoords.latitude - dropoffCoords.latitude) * 2 + 0.02 : 0.04,
+              longitudeDelta: dropoffCoords ? Math.abs(pickupCoords.longitude - dropoffCoords.longitude) * 2 + 0.02 : 0.04,
             }}
           >
-            {/* Pickup point (IUH) */}
+            {/* Pickup point */}
             <Marker
-              coordinate={{ latitude: 10.822, longitude: 106.687 }}
+              coordinate={pickupCoords}
               title="Điểm đón khách"
               description={pickup}
               pinColor="#10B981"
             />
 
-            {/* Dynamic Destination Marker when typing */}
-            {dropoff.length > 0 && (
+            {/* Dynamic Destination Marker */}
+            {dropoffCoords && (
               <Marker
-                coordinate={{ latitude: 10.779, longitude: 106.699 }}
+                coordinate={dropoffCoords}
                 title="Điểm đến của bạn"
                 description={dropoff}
                 pinColor="#EF4444"
@@ -210,7 +329,8 @@ export default function BookingScreen() {
                   style={styles.input}
                   placeholder="Enter pickup point"
                   value={pickup}
-                  onChangeText={setPickup}
+                  onChangeText={(text) => handleAddressSearch(text, 'pickup')}
+                  onFocus={() => setActiveSearch('pickup')}
                 />
               </View>
               
@@ -222,13 +342,38 @@ export default function BookingScreen() {
                   style={styles.input}
                   placeholder="Where to?"
                   value={dropoff}
-                  onChangeText={setDropoff}
+                  onChangeText={(text) => handleAddressSearch(text, 'dropoff')}
+                  onFocus={() => setActiveSearch('dropoff')}
                   autoFocus
                 />
               </View>
             </View>
           </View>
         </View>
+
+        {/* Suggestions list drop-down */}
+        {suggestions.length > 0 && activeSearch && (
+          <View style={styles.suggestionsContainer}>
+            {searching && <ActivityIndicator size="small" color="#6366F1" style={{ marginVertical: 8 }} />}
+            {suggestions.map((item, index) => (
+              <TouchableOpacity
+                key={index}
+                style={styles.suggestionItem}
+                onPress={() => handleSelectSuggestion(item)}
+              >
+                <MapPin size={18} color="#6366F1" />
+                <View style={styles.suggestionTextContainer}>
+                  <Text style={styles.suggestionTitle} numberOfLines={1}>
+                    {item.text || item.place_name.split(',')[0]}
+                  </Text>
+                  <Text style={styles.suggestionSubtitle} numberOfLines={1}>
+                    {item.place_name}
+                  </Text>
+                </View>
+              </TouchableOpacity>
+            ))}
+          </View>
+        )}
 
         {/* Vehicle Selection */}
         <Text style={styles.sectionTitle}>Select Vehicle</Text>
@@ -690,5 +835,43 @@ const styles = StyleSheet.create({
     height: 1,
     backgroundColor: '#F3F4F6',
     marginVertical: 8,
+  },
+  suggestionsContainer: {
+    marginHorizontal: 20,
+    backgroundColor: '#fff',
+    borderRadius: 16,
+    padding: 8,
+    marginTop: -10,
+    marginBottom: 20,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.08,
+    shadowRadius: 10,
+    elevation: 4,
+    borderWidth: 1,
+    borderColor: '#F3F4F6',
+    maxHeight: 250,
+  },
+  suggestionItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingVertical: 12,
+    paddingHorizontal: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F9FAFB',
+    gap: 12,
+  },
+  suggestionTextContainer: {
+    flex: 1,
+  },
+  suggestionTitle: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#1F2937',
+  },
+  suggestionSubtitle: {
+    fontSize: 11,
+    color: '#9CA3AF',
+    marginTop: 2,
   },
 });
