@@ -9,19 +9,9 @@
  */
 import api from './api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import type { CreateBookingPayload } from './types';
 
-export interface CreateBookingPayload {
-  pickupLocation: string;
-  dropoffLocation: string;
-  pickupLat: number;
-  pickupLng: number;
-  dropoffLat: number;
-  dropoffLng: number;
-  vehicleType: 'CAR4' | 'CAR7' | 'BIKE';
-  paymentMethod: 'CASH' | 'MOMO' | 'ZALOPAY' | 'VNPAY';
-  estimatedFare?: number;
-  customerNote?: string;
-}
+export type { CreateBookingPayload } from './types';
 
 export const BookingService = {
   /**
@@ -69,22 +59,6 @@ export const BookingService = {
       { params: { reason } }
     );
     return response.data?.result ?? response.data;
-  },
-
-  /**
-   * POST /api/pricing/estimate
-   * vehicleType must be one of: ECONOMY, COMFORT, PREMIUM
-   */
-  async getPriceEstimate(params: {
-    pickupLat: number; pickupLng: number;
-    dropoffLat: number; dropoffLng: number;
-    vehicleType?: 'ECONOMY' | 'COMFORT' | 'PREMIUM';
-  }) {
-    const response = await api.post('/api/pricing/estimate', {
-      vehicleType: 'ECONOMY',
-      ...params,
-    });
-    return response.data;
   },
 
   /**
