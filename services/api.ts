@@ -6,8 +6,16 @@ const IP_ADDRESS = process.env.EXPO_PUBLIC_IP_ADDRESS ?? 'localhost';
 const GATEWAY_PORT = process.env.EXPO_PUBLIC_GATEWAY_PORT ?? '8080';
 const SOCKET_PORT = process.env.EXPO_PUBLIC_SOCKET_PORT ?? '9093';
 
-export const BASE_URL = `http://${IP_ADDRESS}:${GATEWAY_PORT}`;
-export const SOCKET_URL = `http://${IP_ADDRESS}:${SOCKET_PORT}`;
+// Kiểm tra xem IP_ADDRESS có phải là domain tunnel công khai hay không (ví dụ: ngrok, localtunnel, cloudflare)
+const isTunnel = IP_ADDRESS.startsWith('http') || (IP_ADDRESS.includes('.') && !/^\d+(\.\d+){3}$/.test(IP_ADDRESS));
+
+export const BASE_URL = isTunnel
+  ? (IP_ADDRESS.startsWith('http') ? IP_ADDRESS : `https://${IP_ADDRESS}`)
+  : `http://${IP_ADDRESS}:${GATEWAY_PORT}`;
+
+export const SOCKET_URL = isTunnel
+  ? (IP_ADDRESS.startsWith('http') ? IP_ADDRESS.replace('http', 'ws') : `wss://${IP_ADDRESS}`)
+  : `http://${IP_ADDRESS}:${SOCKET_PORT}`;
 
 const api = axios.create({
   baseURL: BASE_URL,
