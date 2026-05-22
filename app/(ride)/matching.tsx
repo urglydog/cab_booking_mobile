@@ -355,7 +355,7 @@ export default function MatchingScreen() {
               {/* Vehicle type */}
               <View style={styles.pricingRow}>
                 <Text style={styles.pricingLabel}>
-                  {parsedVehicleType === 'CAR' ? 'Xe ô tô (CAB Car)' : 'Xe máy (CAB Bike)'}
+                  {['CAR', 'CAR4', 'CAR7'].includes(parsedVehicleType.toUpperCase()) ? 'Xe ô tô (CAB Car)' : 'Xe máy (CAB Bike)'}
                 </Text>
                 <Text style={styles.pricingLabel}>
                   {(paymentMethod ?? bookingInfo?.paymentMethod ?? 'CASH') === 'CASH' ? 'Tiền mặt' : bookingInfo?.paymentMethod ?? paymentMethod ?? '—'}
