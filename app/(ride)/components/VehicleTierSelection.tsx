@@ -1,7 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity, ActivityIndicator, StyleSheet } from 'react-native';
 import { Bike, Car } from 'lucide-react-native';
-import { VehicleTier, VEHICLE_TIER_LABELS } from '@/services/pricingService';
+import { VehicleTier, VEHICLE_TIER_LABELS, formatVND } from '@/services/pricingService';
 
 interface VehicleTierSelectionProps {
   selectedTier: VehicleTier;
@@ -72,7 +72,7 @@ export default function VehicleTierSelection({
                   <ActivityIndicator size="small" color={isActive ? '#6366F1' : '#9CA3AF'} />
                 ) : (
                   <Text style={[styles.tierPrice, isActive && styles.activeTierPrice]}>
-                    {price !== null ? `~${(price / 1000).toFixed(0)}k` : '...'}
+                    {price !== null ? formatVND(price) : '...'}
                   </Text>
                 )}
               </View>

@@ -25,9 +25,9 @@ import FareSummary from './components/FareSummary';
 import BookButton from './components/BookButton';
 
 const PROMO_CODES = [
-  { id: 'promo-1', code: 'CABNEW',    title: 'Mừng bạn mới',    discount: 30000, description: 'Giảm trực tiếp 30k' },
-  { id: 'promo-2', code: 'CABSUMMER', title: 'CAB Ngày nắng',   discount: 15000, description: 'Giảm trực tiếp 15k' },
-  { id: 'promo-3', code: 'CABVIP',    title: 'CAB Tri ân VIP',  discount: 50000, description: 'Giảm trực tiếp 50k' },
+  { id: 'promo-1', code: 'CABNEW', title: 'Mừng bạn mới', discount: 30000, description: 'Giảm trực tiếp 30k' },
+  { id: 'promo-2', code: 'CABSUMMER', title: 'CAB Ngày nắng', discount: 15000, description: 'Giảm trực tiếp 15k' },
+  { id: 'promo-3', code: 'CABVIP', title: 'CAB Tri ân VIP', discount: 50000, description: 'Giảm trực tiếp 50k' },
 ];
 
 const ESTIMATE_DEBOUNCE_MS = 1200;
@@ -137,14 +137,14 @@ export default function BookingScreen() {
   const router = useRouter();
 
   // ── Form state ──────────────────────────────────────────────
-  const [pickup,        setPickup]        = useState('');
-  const [pickupCoords,  setPickupCoords]  = useState<{ latitude: number; longitude: number } | null>(null);
-  const [dropoff,       setDropoff]       = useState('');
+  const [pickup, setPickup] = useState('');
+  const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+  const [dropoff, setDropoff] = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{ latitude: number; longitude: number } | null>(null);
 
-  const [vehicleTier, setVehicleTier]   = useState<VehicleTier>('CAR4');
+  const [vehicleTier, setVehicleTier] = useState<VehicleTier>('CAR4');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
-  const [loading, setLoading]           = useState(false);
+  const [loading, setLoading] = useState(false);
   const [selectedPromo, setSelectedPromo] = useState<typeof PROMO_CODES[0] | null>(null);
 
   // ── Estimate state ──────────────────────────────────────────
@@ -155,14 +155,14 @@ export default function BookingScreen() {
   });
 
   const [estimateLoading, setEstimateLoading] = useState(false);
-  const [estimateError,   setEstimateError]   = useState<string | null>(null);
+  const [estimateError, setEstimateError] = useState<string | null>(null);
   const [countdown, setCountdown] = useState<number | null>(null);
   const [estimateExpired, setEstimateExpired] = useState(false);
 
   // ── Autocomplete state ───────────────────────────────────────
-  const [suggestions,   setSuggestions]   = useState<any[]>([]);
-  const [activeSearch,  setActiveSearch]  = useState<'pickup' | 'dropoff' | null>(null);
-  const [searching,    setSearching]      = useState(false);
+  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [activeSearch, setActiveSearch] = useState<'pickup' | 'dropoff' | null>(null);
+  const [searching, setSearching] = useState(false);
   const latestSearchRef = useRef(0);
 
   const clearStaleEstimate = () => {
@@ -225,7 +225,7 @@ export default function BookingScreen() {
         `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_KEY}&country=vn&limit=8&language=vi`
       );
       const data = await response.json();
-      
+
       const mapboxFeatures = data.features ?? [];
       const combined = [...localMatches];
       mapboxFeatures.forEach((feat: any) => {
@@ -248,15 +248,25 @@ export default function BookingScreen() {
 
   const handleSelectSuggestion = (item: any) => {
     const coords = {
-      latitude:  item.geometry.coordinates[1],
+      latitude: item.geometry.coordinates[1],
       longitude: item.geometry.coordinates[0],
     };
     if (activeSearch === 'pickup') {
       setPickup(item.place_name ?? item.text);
       setPickupCoords(coords);
+      console.log('[Booking] Pickup selected:', {
+        name: item.place_name ?? item.text,
+        lat: coords.latitude,
+        lng: coords.longitude,
+      });
     } else if (activeSearch === 'dropoff') {
       setDropoff(item.place_name ?? item.text);
       setDropoffCoords(coords);
+      console.log('[Booking] Dropoff selected:', {
+        name: item.place_name ?? item.text,
+        lat: coords.latitude,
+        lng: coords.longitude,
+      });
     }
     setSuggestions([]);
     setActiveSearch(null);
@@ -278,40 +288,52 @@ export default function BookingScreen() {
 
     try {
       // Fetch estimates for all 3 tiers in parallel
+      console.log('[Booking] Fetching estimates with coords:', {
+        pickup: { lat: pC.latitude, lng: pC.longitude },
+        dropoff: { lat: dC.latitude, lng: dC.longitude },
+        idempotencyKey,
+      });
       const [bike, car4, car7] = await Promise.all([
         PricingService.createEstimate(
           {
-            pickupLat:    pC.latitude,
-            pickupLng:    pC.longitude,
-            dropoffLat:   dC.latitude,
-            dropoffLng:   dC.longitude,
-            vehicleType:  'BIKE',
+            pickupLat: pC.latitude,
+            pickupLng: pC.longitude,
+            dropoffLat: dC.latitude,
+            dropoffLng: dC.longitude,
+            vehicleType: 'BIKE',
           },
           `${idempotencyKey}_bike`
         ),
         PricingService.createEstimate(
           {
-            pickupLat:    pC.latitude,
-            pickupLng:    pC.longitude,
-            dropoffLat:   dC.latitude,
-            dropoffLng:   dC.longitude,
-            vehicleType:  'CAR4',
+            pickupLat: pC.latitude,
+            pickupLng: pC.longitude,
+            dropoffLat: dC.latitude,
+            dropoffLng: dC.longitude,
+            vehicleType: 'CAR4',
           },
           `${idempotencyKey}_car4`
         ),
         PricingService.createEstimate(
           {
-            pickupLat:    pC.latitude,
-            pickupLng:    pC.longitude,
-            dropoffLat:   dC.latitude,
-            dropoffLng:   dC.longitude,
-            vehicleType:  'CAR7',
+            pickupLat: pC.latitude,
+            pickupLng: pC.longitude,
+            dropoffLat: dC.latitude,
+            dropoffLng: dC.longitude,
+            vehicleType: 'CAR7',
           },
           `${idempotencyKey}_car7`
         ),
       ]);
 
       setEstimates({ BIKE: bike, CAR4: car4, CAR7: car7 });
+      console.log('[Booking] Estimates received:', {
+        bike: { estimateId: bike.estimateId, totalFare: bike.totalFare },
+        car4: { estimateId: car4.estimateId, totalFare: car4.totalFare },
+        car7: { estimateId: car7.estimateId, totalFare: car7.totalFare },
+        quoteHashBike: bike.quotePayloadHash,
+        quoteHashCar4: car4.quotePayloadHash,
+      });
 
       // Start countdown from the CAR4 estimate expiry
       const remaining = getRemainingSeconds(car4.expiresAt);
@@ -322,45 +344,47 @@ export default function BookingScreen() {
       setEstimateError('Không lấy được giá ước tính. Sử dụng giá mặc định.');
 
       // Fallback: calculate locally for all tiers
+      // NOTE: Booking will fail if backend requires non-blank quotePayloadHash.
+      // This fallback only works if BookingService is relaxed about quote verification.
       const fallbackEst = (fare: number, tier: VehicleTier): FareEstimateResponse => ({
-        estimateId:       'fallback',
-        pickupZone:       'unknown',
-        dropoffZone:      'unknown',
-        vehicleType:      tier,
-        distanceKm:       0,
-        durationMinutes:  0,
-        baseFare:         0,
-        distanceFare:     0,
-        timeFare:         0,
-        platformFee:      0,
-        zoneFee:          0,
-        airportFee:       0,
-        tollFee:          0,
-        discountAmount:   0,
-        surgeMultiplier:  1.0,
-        totalFare:        fare,
-        currency:         'VND',
+        estimateId: 'fallback',
+        pickupZone: 'unknown',
+        dropoffZone: 'unknown',
+        vehicleType: tier,
+        distanceKm: 0,
+        durationMinutes: 0,
+        baseFare: 0,
+        distanceFare: 0,
+        timeFare: 0,
+        platformFee: 0,
+        zoneFee: 0,
+        airportFee: 0,
+        tollFee: 0,
+        discountAmount: 0,
+        surgeMultiplier: 1.0,
+        totalFare: fare,
+        currency: 'VND',
         pricingConfigVersion: '1',
-        distanceSource:   'fallback',
+        distanceSource: 'HAVERSINE_FALLBACK',
         weatherCondition: 'unknown',
-        weatherSource:    'fallback',
-        fallbackUsed:     true,
-        expiresAt:        new Date(Date.now() + 5 * 60 * 1000).toISOString(),
-        status:           'PENDING',
-        quoteId:          'FALLBACK',
+        weatherSource: 'fallback',
+        fallbackUsed: true,
+        expiresAt: new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        status: 'PENDING',
+        quoteId: 'FALLBACK',
         quotePayloadHash: '',
         quoteHashAlgorithm: 'none',
-        message:          'Giá ước tính (fallback)',
+        message: 'Giá ước tính (fallback)',
       });
 
-      const bikeFare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'BIKE', 25);
-      const car4Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR4', 25);
-      const car7Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR7', 25);
+      const bikeFare = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'BIKE', 25, surgeMultiplier);
+      const car4Fare = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR4', 25, surgeMultiplier);
+      const car7Fare = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR7', 25, surgeMultiplier);
 
       setEstimates({
-        BIKE: fallbackEst(bikeFare,  'BIKE'),
-        CAR4: fallbackEst(car4Fare,  'CAR4'),
-        CAR7: fallbackEst(car7Fare,  'CAR7'),
+        BIKE: fallbackEst(bikeFare, 'BIKE'),
+        CAR4: fallbackEst(car4Fare, 'CAR4'),
+        CAR7: fallbackEst(car7Fare, 'CAR7'),
       });
     } finally {
       setEstimateLoading(false);
@@ -377,12 +401,12 @@ export default function BookingScreen() {
 
   // ── Selected estimate (based on tier) ──────────────────────────
   const selectedEstimate = estimates[vehicleTier];
-  const baseFare         = selectedEstimate?.totalFare ?? 0;
-  const discount         = selectedPromo?.discount ?? 0;
-  const finalFare        = Math.max(0, baseFare - discount);
-  const surgeMultiplier  = selectedEstimate?.surgeMultiplier ?? 1.0;
-  const distanceKm       = selectedEstimate?.distanceKm ?? 0;
-  const durationMin      = selectedEstimate?.durationMinutes ?? 0;
+  const baseFare = selectedEstimate?.totalFare ?? 0;
+  const discount = selectedPromo?.discount ?? 0;
+  const finalFare = Math.max(0, baseFare - discount);
+  const surgeMultiplier = selectedEstimate?.surgeMultiplier ?? 1.0;
+  const distanceKm = selectedEstimate?.distanceKm ?? 0;
+  const durationMin = selectedEstimate?.durationMinutes ?? 0;
 
   // ── Submit booking ────────────────────────────────────────────
   const handleBooking = async () => {
@@ -410,7 +434,7 @@ export default function BookingScreen() {
 
     setLoading(true);
     try {
-      const customerId     = (await AsyncStorage.getItem('user_id')) ?? '';
+      const customerId = (await AsyncStorage.getItem('user_id')) ?? '';
       const idempotencyKey = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
       const est = selectedEstimate;
@@ -420,7 +444,7 @@ export default function BookingScreen() {
       const bookingRequest = {
         pickupLocation: pickup,
         dropoffLocation: dropoff,
-        customerNote:  selectedPromo
+        customerNote: selectedPromo
           ? `Áp dụng mã ${selectedPromo.code}`
           : 'Vui lòng đón tôi ở cổng chính.',
         pickupCoordinates: {
@@ -431,15 +455,22 @@ export default function BookingScreen() {
           lat: dropoffCoords.latitude,
           lng: dropoffCoords.longitude,
         },
-        vehicleType:  vehicleTierForApi,
+        vehicleType: vehicleTierForApi,
         paymentMethod,
         estimatedFare: finalFare,
-        promoCode:     selectedPromo ? selectedPromo.code : '',
-        quoteToken:    est?.estimateId ?? '',
+        promoCode: selectedPromo ? selectedPromo.code : '',
+        // Both fields are required by BookingService.confirmQuoteBeforeBooking()
+        estimateId: est?.estimateId ?? '',
+        quotePayloadHash: est?.quotePayloadHash ?? '',
+        surgeMultiplier: surgeMultiplier,
         idempotencyKey,
       };
 
+      console.log('[Booking] Request payload:', JSON.stringify(bookingRequest, null, 2));
+
       const response = await api.post('/api/v1/bookings', bookingRequest);
+      console.log('[Booking] Response:', response.status, JSON.stringify(response.data, null, 2));
+
       const isSuccess =
         response.data?.code === 200 || response.data?.code === 201
         || (response.status >= 200 && response.status < 300 && response.data?.result);
@@ -450,15 +481,15 @@ export default function BookingScreen() {
           pathname: '/matching',
           params: {
             bookingId,
-            estimatedFare:  finalFare.toString(),
-            surge:          surgeMultiplier.toString(),
-            vehicleType:    vehicleTier,
+            estimatedFare: finalFare.toString(),
+            surge: surgeMultiplier.toString(),
+            vehicleType: vehicleTier,
             pickup,
             dropoff,
-            pickupLat:      pickupCoords.latitude.toString(),
-            pickupLng:      pickupCoords.longitude.toString(),
-            dropoffLat:     dropoffCoords.latitude.toString(),
-            dropoffLng:     dropoffCoords.longitude.toString(),
+            pickupLat: pickupCoords.latitude.toString(),
+            pickupLng: pickupCoords.longitude.toString(),
+            dropoffLat: dropoffCoords.latitude.toString(),
+            dropoffLng: dropoffCoords.longitude.toString(),
             paymentMethod,
           },
         });
@@ -575,6 +606,6 @@ export default function BookingScreen() {
 }
 
 const styles = StyleSheet.create({
-  container:      { flex: 1, backgroundColor: '#F8F9FB' },
-  scrollContent:  { paddingBottom: 30 },
+  container: { flex: 1, backgroundColor: '#F8F9FB' },
+  scrollContent: { paddingBottom: 30 },
 });

@@ -8,12 +8,22 @@ import { useRouter } from 'expo-router';
 
 const translateNotificationMessage = (message: string) => {
   if (!message) return '';
-  if (message.includes('Your ride has been cancelled') || message.includes('cancelled')) {
-    const reason = message.split('Reason: ')[1] || '';
+  if (message.includes('Your ride has been cancelled') || message.includes('cancelled') || message.includes('bị hủy')) {
+    const parts = message.split(/Reason:\s*|Lý do:\s*/i);
+    let reason = parts[1] || '';
+    
+    // Clean up reason by removing leading dashes, numbers, dots, spaces
+    reason = reason.replace(/^[-\s\d\.\:]+/, '').trim();
+    
     let viReason = reason;
-    if (reason.includes('TIMEOUT_NO_DRIVER_FOUND')) {
+    const lowerReason = reason.toLowerCase();
+    if (lowerReason.includes('customer requested cancellation') || lowerReason.includes('customer requested') || lowerReason.includes('khách hàng yêu cầu')) {
+      viReason = 'Khách hàng yêu cầu hủy';
+    } else if (lowerReason.includes('timeout_no_driver_found') || lowerReason.includes('no driver') || lowerReason.includes('không tìm thấy tài xế')) {
       viReason = 'Không tìm thấy tài xế sau 3 phút';
-    } else if (reason.includes('Not specified') || !reason) {
+    } else if (lowerReason.includes('driver canceled') || lowerReason.includes('driver rejected') || lowerReason.includes('tài xế đã hủy')) {
+      viReason = 'Tài xế đã hủy chuyến đi';
+    } else if (lowerReason.includes('not specified') || !reason) {
       viReason = 'Không xác định';
     }
     return `Chuyến đi của bạn đã bị hủy. Lý do: ${viReason}`;
@@ -27,15 +37,23 @@ const translateNotificationMessage = (message: string) => {
   if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
     return 'Chuyến đi đã hoàn thành. Cảm ơn bạn!';
   }
+  if (message.includes('Driver accepted') || message.includes('accepted') || message.includes('nhận chuyến')) {
+    return 'Tài xế đã nhận chuyến xe của bạn!';
+  }
+  if (message.includes('Ride started') || message.includes('started') || message.includes('bắt đầu')) {
+    return 'Chuyến đi của bạn đã bắt đầu!';
+  }
   return message;
 };
 
 const translateNotificationTitle = (title: string) => {
   if (!title) return '';
-  if (title === 'Ride Update') return 'Cập nhật chuyến đi';
-  if (title === 'Booking Timeout') return 'Hết thời gian tìm kiếm';
-  if (title === 'Payment Successful') return 'Thanh toán thành công';
-  if (title === 'Ride Completed') return 'Chuyến đi hoàn thành';
+  const lower = title.toLowerCase();
+  if (lower.includes('ride update')) return 'Cập nhật chuyến đi';
+  if (lower.includes('booking timeout')) return 'Hết thời gian tìm kiếm';
+  if (lower.includes('payment successful')) return 'Thanh toán thành công';
+  if (lower.includes('ride completed')) return 'Chuyến đi hoàn thành';
+  if (lower.includes('ride cancelled')) return 'Chuyến đi đã bị hủy';
   return title;
 };
 

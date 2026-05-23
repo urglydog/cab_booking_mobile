@@ -9,7 +9,7 @@ import { ChevronLeft, Send, Bot, User, AlertTriangle, Mic, Image as ImageIcon, M
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline } from 'react-native-maps';
-import { calculateFallbackFare } from '@/services/pricingService';
+import { PricingService, calculateFallbackFare } from '@/services/pricingService';
 
 interface Message {
   id: string;
@@ -100,6 +100,9 @@ export default function AIChatScreen() {
     fare: number;
     vehicle: 'BIKE' | 'CAR4' | 'CAR7';
     payment: 'CASH' | 'MOMO' | 'ZALOPAY' | 'VNPAY';
+    estimateId?: string;
+    quotePayloadHash?: string;
+    surgeMultiplier?: number;
   } | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
@@ -271,29 +274,52 @@ export default function AIChatScreen() {
     setAttachedImage(null);
     setLoading(true);
 
+    // Thêm độ trễ suy nghĩ chân thực (1200ms) để cuộc hội thoại với AI Agent sống động và tự nhiên
+    await new Promise(resolve => setTimeout(resolve, 1200));
+
     // Check if AI can process booking popup locally for smooth UX
     const bookingIntent = parseBookingIntent(messageText);
 
     try {
       if (bookingIntent) {
-        setTimeout(() => {
-          let vehicleLabel = 'Xe máy CAB Bike';
-          if (bookingIntent.vehicle === 'CAR4') vehicleLabel = 'Xe ô tô 4 chỗ';
-          if (bookingIntent.vehicle === 'CAR7') vehicleLabel = 'Xe ô tô 7 chỗ cao cấp';
+        console.log('[AI Chat] Lấy báo giá chính thức từ Pricing Service trước khi hiển thị popup...');
+        const idempotencyKey = `${Date.now()}_ai_est_${Math.random().toString(36).substring(2, 10)}`;
+        try {
+          const officialEstimate = await PricingService.createEstimate(
+            {
+              pickupLat: bookingIntent.pickupCoords.latitude,
+              pickupLng: bookingIntent.pickupCoords.longitude,
+              dropoffLat: bookingIntent.dropoffCoords.latitude,
+              dropoffLng: bookingIntent.dropoffCoords.longitude,
+              vehicleType: bookingIntent.vehicle,
+            },
+            idempotencyKey
+          );
+          bookingIntent.fare = officialEstimate.totalFare;
+          bookingIntent.estimateId = officialEstimate.estimateId;
+          bookingIntent.quotePayloadHash = officialEstimate.quotePayloadHash;
+          bookingIntent.surgeMultiplier = officialEstimate.surgeMultiplier;
+          console.log('[AI Chat] Báo giá chính xác từ backend:', bookingIntent.fare);
+        } catch (estErr) {
+          console.log('[AI Chat] Báo giá microservice thất bại, sử dụng giá ước tính nội bộ:', estErr);
+        }
 
-          setMessages(prev => [...prev, {
-            id: (Date.now() + 1).toString(),
-            role: 'assistant',
-            content: `🔮 Tôi đã lập lộ trình tối ưu cho bạn!\n\n📍 **Điểm đón:** ${bookingIntent.pickup}\n🏁 **Điểm đến:** ${bookingIntent.dropoff}\n🚗 **Phương tiện:** ${vehicleLabel}\n\n*Tôi đang hiển thị màn hình xác nhận chuyến đi bên dưới để bạn kiểm tra và đặt xe ngay lập tức!*`,
-            timestamp: new Date(),
-          }]);
-          
-          setBookingDetails(bookingIntent);
-          setAppliedDiscount(0);
-          setAppliedPromoCode('');
-          setIsBookingModalVisible(true);
-          setLoading(false);
-        }, 250);
+        let vehicleLabel = 'Xe máy CAB Bike';
+        if (bookingIntent.vehicle === 'CAR4') vehicleLabel = 'Xe ô tô 4 chỗ';
+        if (bookingIntent.vehicle === 'CAR7') vehicleLabel = 'Xe ô tô 7 chỗ cao cấp';
+
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: `🔮 Tôi đã lập lộ trình tối ưu cho bạn!\n\n📍 **Điểm đón:** ${bookingIntent.pickup}\n🏁 **Điểm đến:** ${bookingIntent.dropoff}\n🚗 **Phương tiện:** ${vehicleLabel}\n\n*Tôi đang hiển thị màn hình xác nhận chuyến đi bên dưới để bạn kiểm tra và đặt xe ngay lập tức!*`,
+          timestamp: new Date(),
+        }]);
+        
+        setBookingDetails(bookingIntent);
+        setAppliedDiscount(0);
+        setAppliedPromoCode('');
+        setIsBookingModalVisible(true);
+        setLoading(false);
         return;
       }
 
@@ -325,34 +351,124 @@ export default function AIChatScreen() {
     }
   };
 
+  const handleSwitchVehicle = async (vehicleType: 'BIKE' | 'CAR4' | 'CAR7') => {
+    if (!bookingDetails) return;
+    
+    // 1. Update vehicle type in UI instantly with local calculated fallback fare so there is zero layout stutter
+    const localFare = Math.round(calculateFallbackFare(
+      bookingDetails.pickupCoords.latitude,
+      bookingDetails.pickupCoords.longitude,
+      bookingDetails.dropoffCoords.latitude,
+      bookingDetails.dropoffCoords.longitude,
+      vehicleType
+    ) / 1000) * 1000;
+
+    setBookingDetails(prev => prev ? { 
+      ...prev, 
+      vehicle: vehicleType, 
+      fare: localFare,
+      estimateId: undefined, // Clear old quote metadata to force correct verification
+      quotePayloadHash: undefined 
+    } : null);
+
+    // 2. Fetch official pricing in background for the newly selected vehicle
+    try {
+      console.log(`[AI Chat] Fetching real pricing for switched vehicle: ${vehicleType}...`);
+      const idempotencyKey = `${Date.now()}_ai_switch_${Math.random().toString(36).substring(2, 10)}`;
+      const officialEstimate = await PricingService.createEstimate(
+        {
+          pickupLat: bookingDetails.pickupCoords.latitude,
+          pickupLng: bookingDetails.pickupCoords.longitude,
+          dropoffLat: bookingDetails.dropoffCoords.latitude,
+          dropoffLng: bookingDetails.dropoffCoords.longitude,
+          vehicleType: vehicleType,
+        },
+        idempotencyKey
+      );
+
+      setBookingDetails(prev => {
+        if (!prev || prev.vehicle !== vehicleType) return prev; // Avoid race condition if user tapped another option
+        return {
+          ...prev,
+          fare: officialEstimate.totalFare,
+          estimateId: officialEstimate.estimateId,
+          quotePayloadHash: officialEstimate.quotePayloadHash,
+          surgeMultiplier: officialEstimate.surgeMultiplier
+        };
+      });
+      console.log('[AI Chat] Switched vehicle real fare:', officialEstimate.totalFare);
+    } catch (err) {
+      console.log('[AI Chat] Failed to fetch real estimate for switched vehicle, using fallback:', err);
+    }
+  };
+
   const handleConfirmBooking = async () => {
     if (!bookingDetails) return;
     setConfirmLoading(true);
 
-    const baseFare = bookingDetails.fare;
-    const finalFare = Math.max(2000, baseFare - appliedDiscount);
-
     try {
-      const userId = await AsyncStorage.getItem('user_id') || 'demo-user-123';
-      
-      const payload = {
-        customerId: userId,
+      const userId = await AsyncStorage.getItem('user_id') || '';
+      const idempotencyKey = `${Date.now()}_ai_${Math.random().toString(36).substring(2, 10)}`;
+
+      let estimateId = bookingDetails.estimateId;
+      let quotePayloadHash = bookingDetails.quotePayloadHash;
+      let surgeMultiplier = bookingDetails.surgeMultiplier ?? 1.0;
+      let baseFare = bookingDetails.fare;
+
+      // Nếu chưa có báo giá từ bước trước (ví dụ bị lỗi mạng lúc đó), lấy báo giá ngay bây giờ
+      if (!estimateId || !quotePayloadHash) {
+        console.log('[AI Chat] Chưa có estimateId, tiến hành lấy báo giá từ Pricing Service...');
+        const pricingPayload = {
+          pickupLat: bookingDetails.pickupCoords.latitude,
+          pickupLng: bookingDetails.pickupCoords.longitude,
+          dropoffLat: bookingDetails.dropoffCoords.latitude,
+          dropoffLng: bookingDetails.dropoffCoords.longitude,
+          vehicleType: bookingDetails.vehicle,
+        };
+        const estimate = await PricingService.createEstimate(pricingPayload, `${idempotencyKey}_pricing`);
+        estimateId = estimate.estimateId;
+        quotePayloadHash = estimate.quotePayloadHash;
+        baseFare = estimate.totalFare;
+        surgeMultiplier = estimate.surgeMultiplier ?? 1.0;
+      }
+
+      const finalFare = Math.max(2000, baseFare - appliedDiscount);
+
+      // 2. Tạo payload đặt xe chuẩn tương thích 100% với BookingServiceImpl
+      const bookingRequest = {
         pickupLocation: bookingDetails.pickup,
         dropoffLocation: bookingDetails.dropoff,
-        pickupLatitude: bookingDetails.pickupCoords.latitude,
-        pickupLongitude: bookingDetails.pickupCoords.longitude,
-        dropoffLatitude: bookingDetails.dropoffCoords.latitude,
-        dropoffLongitude: bookingDetails.dropoffCoords.longitude,
+        customerNote: appliedPromoCode
+          ? `Đặt qua AI - Áp dụng mã ${appliedPromoCode}`
+          : 'Đặt qua AI Agent rảnh tay.',
+        pickupCoordinates: {
+          lat: bookingDetails.pickupCoords.latitude,
+          lng: bookingDetails.pickupCoords.longitude,
+        },
+        dropoffCoordinates: {
+          lat: bookingDetails.dropoffCoords.latitude,
+          lng: bookingDetails.dropoffCoords.longitude,
+        },
         vehicleType: bookingDetails.vehicle,
         paymentMethod: bookingDetails.payment,
         estimatedFare: finalFare,
+        promoCode: appliedPromoCode || '',
+        estimateId: estimateId ?? '',
+        quotePayloadHash: quotePayloadHash ?? '',
+        surgeMultiplier: surgeMultiplier,
+        idempotencyKey,
       };
 
-      const res = await api.post('/api/v1/bookings', payload);
+      console.log('[AI Chat] Gửi yêu cầu đặt xe chính thức:', JSON.stringify(bookingRequest, null, 2));
+      const res = await api.post('/api/v1/bookings', bookingRequest);
       const createdBooking = res.data?.result || res.data;
-      const bookingId = createdBooking.id || `booking-mock-${Date.now()}`;
+      const bookingId = createdBooking.id;
 
-      // Save promo info and original fare for detail.tsx consumption
+      if (!bookingId) {
+        throw new Error(res.data?.message || 'Không nhận được booking ID từ hệ thống.');
+      }
+
+      // Lưu thông tin khuyến mãi để hiển thị ở detail.tsx
       const promoInfo = {
         promoCode: appliedPromoCode || null,
         discountAmount: appliedDiscount,
@@ -362,13 +478,13 @@ export default function AIChatScreen() {
 
       setIsBookingModalVisible(false);
       
-      // Redirect straight to matching/tracking screen!
+      // Chuyển sang màn hình matching thật
       router.push({
-        pathname: '/(ride)/matching',
+        pathname: '/matching',
         params: {
           bookingId: bookingId,
           estimatedFare: finalFare.toString(),
-          surge: '1.0',
+          surge: surgeMultiplier.toString(),
           vehicleType: bookingDetails.vehicle,
           pickup: bookingDetails.pickup,
           dropoff: bookingDetails.dropoff,
@@ -380,40 +496,12 @@ export default function AIChatScreen() {
         }
       });
     } catch (err: any) {
-      console.log('Failed to create booking through AI:', err);
-      // Fallback successful simulation to ensure seamless user test
-      const mockId = `booking-mock-${Date.now()}`;
-      const promoInfo = {
-        promoCode: appliedPromoCode || null,
-        discountAmount: appliedDiscount,
-        baseFare: baseFare
-      };
-      await AsyncStorage.setItem(`booking_promo_${mockId}`, JSON.stringify(promoInfo));
-
-      setIsBookingModalVisible(false);
-      Alert.alert('Thành công (Demo Mode)', 'AI Agent đang kết nối tìm tài xế gần nhất cho bạn...', [
-        {
-          text: 'Đồng ý',
-          onPress: () => {
-            router.push({
-              pathname: '/(ride)/matching',
-              params: {
-                bookingId: mockId,
-                estimatedFare: finalFare.toString(),
-                surge: '1.0',
-                vehicleType: bookingDetails.vehicle,
-                pickup: bookingDetails.pickup,
-                dropoff: bookingDetails.dropoff,
-                pickupLat: bookingDetails.pickupCoords.latitude.toString(),
-                pickupLng: bookingDetails.pickupCoords.longitude.toString(),
-                dropoffLat: bookingDetails.dropoffCoords.latitude.toString(),
-                dropoffLng: bookingDetails.dropoffCoords.longitude.toString(),
-                paymentMethod: bookingDetails.payment,
-              }
-            });
-          }
-        }
-      ]);
+      console.log('Failed to create booking through AI:', err?.response?.data ?? err);
+      const errMsg = err?.response?.data?.message ?? err?.message ?? 'Đã xảy ra sự cố kết nối.';
+      Alert.alert(
+        'Đặt xe thất bại',
+        `Không thể khởi tạo chuyến đi qua AI: ${errMsg}. Vui lòng đặt xe thủ công hoặc thử lại sau.`
+      );
     } finally {
       setConfirmLoading(false);
     }
@@ -708,49 +796,19 @@ export default function AIChatScreen() {
                     <View style={styles.pillRow}>
                       <TouchableOpacity 
                         style={[styles.pill, bookingDetails.vehicle === 'BIKE' && styles.pillSelected]}
-                        onPress={() => setBookingDetails(prev => {
-                          if (!prev) return null;
-                          const newFare = Math.round(calculateFallbackFare(
-                            prev.pickupCoords.latitude,
-                            prev.pickupCoords.longitude,
-                            prev.dropoffCoords.latitude,
-                            prev.dropoffCoords.longitude,
-                            'BIKE'
-                          ) / 1000) * 1000;
-                          return { ...prev, vehicle: 'BIKE', fare: newFare };
-                        })}
+                        onPress={() => handleSwitchVehicle('BIKE')}
                       >
                         <Text style={[styles.pillText, bookingDetails.vehicle === 'BIKE' && styles.pillTextSelected]}>🏍️ Xe máy</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
                         style={[styles.pill, bookingDetails.vehicle === 'CAR4' && styles.pillSelected]}
-                        onPress={() => setBookingDetails(prev => {
-                          if (!prev) return null;
-                          const newFare = Math.round(calculateFallbackFare(
-                            prev.pickupCoords.latitude,
-                            prev.pickupCoords.longitude,
-                            prev.dropoffCoords.latitude,
-                            prev.dropoffCoords.longitude,
-                            'CAR4'
-                          ) / 1000) * 1000;
-                          return { ...prev, vehicle: 'CAR4', fare: newFare };
-                        })}
+                        onPress={() => handleSwitchVehicle('CAR4')}
                       >
                         <Text style={[styles.pillText, bookingDetails.vehicle === 'CAR4' && styles.pillTextSelected]}>🚗 4 Chỗ</Text>
                       </TouchableOpacity>
                       <TouchableOpacity 
                         style={[styles.pill, bookingDetails.vehicle === 'CAR7' && styles.pillSelected]}
-                        onPress={() => setBookingDetails(prev => {
-                          if (!prev) return null;
-                          const newFare = Math.round(calculateFallbackFare(
-                            prev.pickupCoords.latitude,
-                            prev.pickupCoords.longitude,
-                            prev.dropoffCoords.latitude,
-                            prev.dropoffCoords.longitude,
-                            'CAR7'
-                          ) / 1000) * 1000;
-                          return { ...prev, vehicle: 'CAR7', fare: newFare };
-                        })}
+                        onPress={() => handleSwitchVehicle('CAR7')}
                       >
                         <Text style={[styles.pillText, bookingDetails.vehicle === 'CAR7' && styles.pillTextSelected]}>🚙 7 Chỗ</Text>
                       </TouchableOpacity>
