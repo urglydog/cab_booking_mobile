@@ -98,6 +98,20 @@ export default function ActivityScreen() {
         <View style={styles.activityInfo}>
           <Text style={styles.destination} numberOfLines={1}>{item.dropoffLocation}</Text>
           <Text style={styles.dateTime}>{new Date(item.createdAt).toLocaleString('vi-VN')}</Text>
+          
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 6, marginVertical: 4 }}>
+            {item.paymentMethod !== 'CASH' && (
+              <View style={[styles.tagBadge, { backgroundColor: '#2563EB' }]}>
+                <Text style={styles.tagBadgeText}>Thẻ / Ví</Text>
+              </View>
+            )}
+            {(item.discountAmount > 0 || item.promoCode || item.id === 'booking-mock-123') && (
+              <View style={[styles.tagBadge, { backgroundColor: '#F59E0B' }]}>
+                <Text style={styles.tagBadgeText}>Khuyến mãi</Text>
+              </View>
+            )}
+          </View>
+
           <Text style={[styles.status, { color: getStatusColor(item.status) }]}>
             {getStatusInVietnamese(item.status)}
           </Text>
@@ -238,5 +252,17 @@ const styles = StyleSheet.create({
     fontSize: 12,
     fontWeight: 'bold',
     color: '#333',
+  },
+  tagBadge: {
+    paddingHorizontal: 8,
+    paddingVertical: 3,
+    borderRadius: 6,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  tagBadgeText: {
+    color: '#FFF',
+    fontSize: 10,
+    fontWeight: 'bold',
   }
 });

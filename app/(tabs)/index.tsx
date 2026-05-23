@@ -1,21 +1,35 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Animated, Easing, Platform } from 'react-native';
+import { StyleSheet, View, Text, ScrollView, TouchableOpacity, Animated, Easing, Platform, Modal, Alert, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, Car, Bell, MapPin, ChevronRight, History, Sparkles, MessageSquare } from 'lucide-react-native';
+import { Search, Car, Bell, MapPin, ChevronRight, History, Sparkles, MessageSquare, X, Phone } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
 import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const formatVND = (num: number) => {
+  return (num || 0).toLocaleString('vi-VN') + 'đ';
+};
+
 const translateNotificationMessage = (message: string) => {
   if (!message) return '';
-  if (message.includes('Your ride has been cancelled') || message.includes('cancelled')) {
-    const reason = message.split('Reason: ')[1] || '';
+  if (message.includes('Your ride has been cancelled') || message.includes('cancelled') || message.includes('bị hủy')) {
+    const parts = message.split(/Reason:\s*|Lý do:\s*/i);
+    let reason = parts[1] || '';
+    
+    // Clean up reason by removing leading dashes, numbers, dots, spaces
+    reason = reason.replace(/^[-\s\d\.\:]+/, '').trim();
+    
     let viReason = reason;
-    if (reason.includes('TIMEOUT_NO_DRIVER_FOUND')) {
+    const lowerReason = reason.toLowerCase();
+    if (lowerReason.includes('customer requested cancellation') || lowerReason.includes('customer requested') || lowerReason.includes('khách hàng yêu cầu')) {
+      viReason = 'Khách hàng yêu cầu hủy';
+    } else if (lowerReason.includes('timeout_no_driver_found') || lowerReason.includes('no driver') || lowerReason.includes('không tìm thấy tài xế')) {
       viReason = 'Không tìm thấy tài xế sau 3 phút';
-    } else if (reason.includes('Not specified') || !reason) {
+    } else if (lowerReason.includes('driver canceled') || lowerReason.includes('driver rejected') || lowerReason.includes('tài xế đã hủy')) {
+      viReason = 'Tài xế đã hủy chuyến đi';
+    } else if (lowerReason.includes('not specified') || !reason) {
       viReason = 'Không xác định';
     }
     return `Chuyến đi của bạn đã bị hủy. Lý do: ${viReason}`;
@@ -28,6 +42,12 @@ const translateNotificationMessage = (message: string) => {
   }
   if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
     return 'Chuyến đi đã hoàn thành. Cảm ơn bạn!';
+  }
+  if (message.includes('Driver accepted') || message.includes('accepted') || message.includes('nhận chuyến')) {
+    return 'Tài xế đã nhận chuyến xe của bạn!';
+  }
+  if (message.includes('Ride started') || message.includes('started') || message.includes('bắt đầu')) {
+    return 'Chuyến đi của bạn đã bắt đầu!';
   }
   return message;
 };
@@ -50,6 +70,7 @@ export default function HomeScreen() {
   const { socket, unreadCount, setUnreadCount } = useSocket();
   const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = useState<any[]>([]);
+  const [showTrackingModal, setShowTrackingModal] = useState(false);
 
   // Promo Carousel State & Animation
   const [currentPromoIdx, setCurrentPromoIdx] = useState(0);
@@ -100,6 +121,10 @@ export default function HomeScreen() {
     if (socket) {
       socket.on('new_notification', (data: any) => {
         setLatestNotification(translateNotificationMessage(data.message || 'Cập nhật mới cho chuyến đi của bạn!'));
+        fetchDashboardData();
+      });
+      socket.on('booking_status_update', (data: any) => {
+        fetchDashboardData();
       });
     }
 
@@ -159,7 +184,10 @@ export default function HomeScreen() {
     ).start();
 
     return () => {
-      if (socket) socket.off('new_notification');
+      if (socket) {
+        socket.off('new_notification');
+        socket.off('booking_status_update');
+      }
       clearInterval(bannerTimer);
       clearInterval(suggestionTimer);
     };
@@ -180,6 +208,11 @@ export default function HomeScreen() {
   };
 
   const currentPromo = BANNER_PROMOS[currentPromoIdx];
+
+  // Detect if the user has an active (in-progress) booking
+  const ACTIVE_STATUSES = ['MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
+  const latestBooking = recentBookings.find((b: any) => ACTIVE_STATUSES.includes(b.status));
+  const isActive = !!latestBooking;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -342,6 +375,173 @@ export default function HomeScreen() {
             <Sparkles size={24} color="#FFF" />
           </TouchableOpacity>
         </Animated.View>
+
+        {/* ── FLOATING TRIP TRACKER CARD ── */}
+        {isActive && (
+          <TouchableOpacity
+            style={styles.floatingTrackerCard}
+            onPress={() => setShowTrackingModal(true)}
+            activeOpacity={0.9}
+          >
+            <View style={styles.trackerHeader}>
+              <View style={styles.trackerStatusRow}>
+                <ActivityIndicator size="small" color="#FFF" style={{ marginRight: 6 }} />
+                <Text style={styles.trackerStatusText}>
+                  {latestBooking.status === 'MATCHING' ? 'Đang tìm tài xế...' :
+                   latestBooking.status === 'ARRIVING' ? 'Tài xế đang đến...' :
+                   latestBooking.status === 'STARTED' || latestBooking.status === 'IN_PROGRESS' ? 'Chuyến đi đã bắt đầu' :
+                   'Tài xế đã nhận chuyến'}
+                </Text>
+              </View>
+              <Text style={styles.trackerPriceText}>{formatVND(latestBooking.estimatedFare)}</Text>
+            </View>
+            
+            <View style={styles.trackerBody}>
+              <MapPin size={16} color="#FFF" />
+              <Text style={styles.trackerAddressText} numberOfLines={1}>
+                Đến: {latestBooking.dropoffLocation}
+              </Text>
+              <Text style={styles.trackerActionText}>Xem Chi Tiết ➔</Text>
+            </View>
+          </TouchableOpacity>
+        )}
+
+        {/* ── DETAILED TRIP TRACKING MODAL ── */}
+        <Modal
+          visible={showTrackingModal}
+          animationType="slide"
+          transparent={false}
+          onRequestClose={() => setShowTrackingModal(false)}
+        >
+          <View style={[styles.modalContainer, { paddingTop: Platform.OS === 'ios' ? 50 : 25 }]}>
+            {/* Header */}
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setShowTrackingModal(false)} style={styles.modalCloseButton}>
+                <X size={24} color="#333" />
+              </TouchableOpacity>
+              <Text style={styles.modalHeaderTitle}>Thông tin chuyến xe</Text>
+              <View style={{ width: 40 }} />
+            </View>
+
+            {latestBooking && (
+              <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+                {/* Status Section */}
+                <View style={styles.modalStatusCard}>
+                  <View style={styles.modalStatusBadge}>
+                    <ActivityIndicator size="small" color="#6366F1" style={{ marginRight: 6 }} />
+                    <Text style={styles.modalStatusText}>
+                      {latestBooking.status === 'MATCHING' ? 'Đang tìm tài xế gần nhất...' :
+                       latestBooking.status === 'ASSIGNED' || latestBooking.status === 'ACCEPTED' ? 'Tài xế đã nhận chuyến' :
+                       latestBooking.status === 'ARRIVING' ? 'Tài xế đang đến điểm đón' :
+                       latestBooking.status === 'STARTED' || latestBooking.status === 'IN_PROGRESS' ? 'Bạn đang trong hành trình' :
+                       'Đang di chuyển'}
+                    </Text>
+                  </View>
+                  <Text style={styles.modalFareText}>{formatVND(latestBooking.estimatedFare)}</Text>
+                  <Text style={styles.modalVehicleText}>
+                    Dịch vụ: {latestBooking.vehicleType === 'BIKE' ? 'Xe máy (CAB Bike)' : 'Xe ô tô (CAB Car)'}
+                  </Text>
+                </View>
+
+                {/* Journey Route Details */}
+                <View style={styles.modalSectionCard}>
+                  <Text style={styles.modalSectionTitle}>Hành trình</Text>
+                  <View style={styles.modalRouteRow}>
+                    <View style={styles.modalRouteDotContainer}>
+                      <View style={[styles.modalRouteDot, { backgroundColor: '#10B981' }]} />
+                      <View style={styles.modalRouteLine} />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.modalAddressLabel}>Điểm đón</Text>
+                      <Text style={styles.modalAddressText}>{latestBooking.pickupLocation}</Text>
+                    </View>
+                  </View>
+
+                  <View style={styles.modalRouteRow}>
+                    <View style={styles.modalRouteDotContainer}>
+                      <MapPin size={16} color="#EF4444" />
+                    </View>
+                    <View style={{ flex: 1, marginLeft: 12 }}>
+                      <Text style={styles.modalAddressLabel}>Điểm đến</Text>
+                      <Text style={styles.modalAddressText}>{latestBooking.dropoffLocation}</Text>
+                    </View>
+                  </View>
+                </View>
+
+                {/* Driver Details (If matched) */}
+                <View style={styles.modalSectionCard}>
+                  <Text style={styles.modalSectionTitle}>Tài xế phục vụ</Text>
+                  {latestBooking.assignedDriverId ? (
+                    <>
+                      <View style={styles.modalDriverRow}>
+                        <View style={styles.modalDriverAvatar}>
+                          <Text style={styles.modalDriverAvatarText}>TX</Text>
+                        </View>
+                        <View style={{ flex: 1, marginLeft: 12 }}>
+                          <Text style={styles.modalDriverName}>Tài xế Nguyễn Chí Thiện</Text>
+                          <Text style={styles.modalDriverSubtext}>Biển số: 59U1-123.45 • Trắng • Honda Vision</Text>
+                          <Text style={styles.modalDriverRating}>⭐ 4.9 (320 chuyến đi)</Text>
+                        </View>
+                      </View>
+
+                      {/* Chat and Call Buttons inside Driver Card */}
+                      <View style={styles.modalActionsRow}>
+                        <TouchableOpacity
+                          style={styles.modalChatButton}
+                          onPress={() => {
+                            setShowTrackingModal(false);
+                            router.push({
+                              pathname: '/(ride)/chat',
+                              params: { bookingId: latestBooking.id, driverName: 'Tài xế Nguyễn Chí Thiện' }
+                            });
+                          }}
+                        >
+                          <MessageSquare size={18} color="#FFF" style={{ marginRight: 6 }} />
+                          <Text style={styles.modalChatButtonText}>Trò chuyện</Text>
+                        </TouchableOpacity>
+
+                        <TouchableOpacity
+                          style={styles.modalCallButton}
+                          onPress={() => {
+                            Alert.alert('Gọi tài xế', 'Đang kết nối cuộc gọi đến tài xế Nguyễn Chí Thiện qua số +84 901234567...');
+                          }}
+                        >
+                          <Phone size={18} color="#2563EB" style={{ marginRight: 6 }} />
+                          <Text style={styles.modalCallButtonText}>Gọi điện</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </>
+                  ) : (
+                    <View style={{ paddingVertical: 15, alignItems: 'center', backgroundColor: '#FFFBEB', borderRadius: 12, paddingHorizontal: 12, borderWidth: 1, borderColor: '#FEF3C7' }}>
+                      <ActivityIndicator size="small" color="#D97706" style={{ marginBottom: 8 }} />
+                      <Text style={{ color: '#D97706', fontWeight: 'bold', fontSize: 14 }}>Đang kết nối tìm tài xế...</Text>
+                      <Text style={{ color: '#78350F', fontSize: 12, marginTop: 4, textAlign: 'center', lineHeight: 16 }}>Hệ thống đang kết nối chuyến đi của bạn với các đối tác tài xế CAB gần nhất ở xung quanh.</Text>
+                    </View>
+                  )}
+                </View>
+
+                {/* Cancel Button (Visible if MATCHING/FINDING) */}
+                {latestBooking.status === 'MATCHING' && (
+                  <TouchableOpacity
+                    style={styles.modalCancelButton}
+                    onPress={async () => {
+                      try {
+                        await api.post(`/api/v1/bookings/${latestBooking.id}/cancel`);
+                        setShowTrackingModal(false);
+                        fetchDashboardData();
+                        Alert.alert('Thành công', 'Đã hủy chuyến đi.');
+                      } catch {
+                        Alert.alert('Lỗi', 'Không thể hủy chuyến đi. Vui lòng thử lại.');
+                      }
+                    }}
+                  >
+                    <Text style={styles.modalCancelButtonText}>Hủy chuyến đi</Text>
+                  </TouchableOpacity>
+                )}
+              </ScrollView>
+            )}
+          </View>
+        </Modal>
       </View>
     </SafeAreaView>
   );
@@ -671,5 +871,259 @@ const styles = StyleSheet.create({
     height: 58,
     borderRadius: 29,
     backgroundColor: '#7C3AED',
+  },
+
+  // ── PREMIUM FLOATING ACTIVE TRIP TRACKER STYLES ──
+  floatingTrackerCard: {
+    position: 'absolute',
+    bottom: 110,
+    left: 20,
+    right: 20,
+    backgroundColor: '#1E293B', // Rich dark slate blue
+    borderRadius: 16,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.15,
+    shadowRadius: 12,
+    elevation: 8,
+    zIndex: 998,
+    borderWidth: 1,
+    borderColor: '#334155',
+  },
+  trackerHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#334155',
+    paddingBottom: 10,
+    marginBottom: 10,
+  },
+  trackerStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+  },
+  trackerStatusText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  trackerPriceText: {
+    color: '#38BDF8', // Cyan sky price text
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  trackerBody: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  trackerAddressText: {
+    flex: 1,
+    color: '#E2E8F0',
+    fontSize: 13,
+  },
+  trackerActionText: {
+    color: '#38BDF8',
+    fontSize: 12,
+    fontWeight: '700',
+  },
+
+  // ── DETAILED TRACKING MODAL STYLES ──
+  modalContainer: {
+    flex: 1,
+    backgroundColor: '#F8FAFC',
+  },
+  modalHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: '#FFF',
+    borderBottomWidth: 1,
+    borderBottomColor: '#E2E8F0',
+  },
+  modalCloseButton: {
+    padding: 12,
+    marginLeft: -8,
+  },
+  modalHeaderTitle: {
+    fontSize: 17,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  modalContent: {
+    padding: 16,
+    paddingBottom: 32,
+  },
+  modalStatusCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 20,
+    alignItems: 'center',
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.04,
+    shadowRadius: 6,
+    elevation: 2,
+  },
+  modalStatusBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#EEF2FF',
+    paddingHorizontal: 14,
+    paddingVertical: 8,
+    borderRadius: 12,
+    marginBottom: 12,
+  },
+  modalStatusText: {
+    color: '#4F46E5',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  modalFareText: {
+    fontSize: 28,
+    fontWeight: '900',
+    color: '#0F172A',
+    marginBottom: 6,
+  },
+  modalVehicleText: {
+    fontSize: 13,
+    color: '#64748B',
+    fontWeight: '500',
+  },
+  modalSectionCard: {
+    backgroundColor: '#FFF',
+    borderRadius: 16,
+    padding: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+  },
+  modalSectionTitle: {
+    fontSize: 14,
+    fontWeight: '700',
+    color: '#64748B',
+    textTransform: 'uppercase',
+    letterSpacing: 0.5,
+    marginBottom: 14,
+  },
+  modalRouteRow: {
+    flexDirection: 'row',
+    marginBottom: 14,
+  },
+  modalRouteDotContainer: {
+    width: 20,
+    alignItems: 'center',
+    marginTop: 4,
+  },
+  modalRouteDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  modalRouteLine: {
+    width: 2,
+    height: 36,
+    backgroundColor: '#E2E8F0',
+    marginVertical: 4,
+  },
+  modalAddressLabel: {
+    fontSize: 11,
+    color: '#94A3B8',
+    fontWeight: '600',
+  },
+  modalAddressText: {
+    fontSize: 14,
+    color: '#334155',
+    marginTop: 2,
+    lineHeight: 18,
+  },
+  modalDriverRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
+    paddingBottom: 14,
+    marginBottom: 14,
+  },
+  modalDriverAvatar: {
+    width: 46,
+    height: 46,
+    borderRadius: 23,
+    backgroundColor: '#6366F1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  modalDriverAvatarText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  modalDriverName: {
+    fontSize: 15,
+    fontWeight: '700',
+    color: '#0F172A',
+  },
+  modalDriverSubtext: {
+    fontSize: 12,
+    color: '#64748B',
+    marginTop: 1,
+  },
+  modalDriverRating: {
+    fontSize: 12,
+    fontWeight: '600',
+    color: '#D97706',
+    marginTop: 4,
+  },
+  modalActionsRow: {
+    flexDirection: 'row',
+    gap: 12,
+  },
+  modalChatButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#2563EB',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  modalChatButtonText: {
+    color: '#FFF',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalCallButton: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF',
+    borderWidth: 1,
+    borderColor: '#BFDBFE',
+    paddingVertical: 12,
+    borderRadius: 12,
+  },
+  modalCallButtonText: {
+    color: '#2563EB',
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  modalCancelButton: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 14,
+    marginTop: 8,
+  },
+  modalCancelButtonText: {
+    color: '#EF4444',
+    fontSize: 14,
+    fontWeight: '700',
   }
 });
