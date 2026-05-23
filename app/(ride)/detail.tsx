@@ -238,7 +238,7 @@ export default function RideDetailScreen() {
 
       // Call Direct Review Service through API Gateway path /api/reviews
       await api.post('/api/reviews', reviewPayload);
-      
+
       setIsReviewed(true);
       Alert.alert('Thành công', 'Cảm ơn bạn đã gửi đánh giá cho tài xế!');
     } catch (error) {
@@ -288,100 +288,7 @@ export default function RideDetailScreen() {
       </View>
 
       <ScrollView contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
-        {/* ── Fare & Pricing Breakdown Card ────────────────────── */}
-        <View style={styles.card}>
-          <Text style={styles.cardTitle}>Chi tiết giá</Text>
-
-          {/* Surge indicator */}
-          {(() => {
-            const surgeValue = booking.estimateSurge ?? booking.surgeMultiplier ?? 1.0;
-            return surgeValue > 1.0 ? (
-              <View style={[styles.surgeRow, { backgroundColor: getSurgeColor(surgeValue) + '12' }]}>
-                <View style={styles.surgeLeft}>
-                  <Zap size={14} color={getSurgeColor(surgeValue)} />
-                  <Text style={[styles.surgeRowLabel, { color: getSurgeColor(surgeValue) }]}>
-                    Cước cao điểm
-                  </Text>
-                </View>
-                <Text style={[styles.surgeRowValue, { color: getSurgeColor(surgeValue) }]}>
-                  ×{surgeValue.toFixed(1)} {getSurgeLabel(surgeValue)}
-                </Text>
-              </View>
-            ) : null;
-          })()}
-
-          {/* Route info */}
-          {(booking.distanceKm || booking.durationMinutes) && (
-            <View style={styles.routeInfoRow}>
-              <View style={styles.routeInfoItem}>
-                <Route size={13} color="#6366F1" />
-                <Text style={styles.routeInfoText}>{booking.distanceKm ? `${parseFloat(booking.distanceKm).toFixed(1)} km` : '—'}</Text>
-              </View>
-              <View style={styles.routeInfoItem}>
-                <Clock size={13} color="#6366F1" />
-                <Text style={styles.routeInfoText}>{booking.durationMinutes ? `~${booking.durationMinutes} phút` : '—'}</Text>
-              </View>
-            </View>
-          )}
-
-          {/* Price breakdown rows */}
-          {[
-            booking.baseFare     && { 
-              label: booking.promoCode ? 'Giá cước gốc' : 'Cước cơ bản', 
-              value: booking.baseFare 
-            },
-            booking.distanceFare && { label: 'Cước theo km',   value: booking.distanceFare },
-            booking.timeFare     && { label: 'Cước theo phút', value: booking.timeFare },
-            booking.platformFee  && { label: 'Phí nền tảng',   value: booking.platformFee },
-            booking.zoneFee      && booking.zoneFee > 0 && { label: 'Phí khu vực',   value: booking.zoneFee },
-            booking.airportFee   && booking.airportFee > 0 && { label: 'Phí sân bay',  value: booking.airportFee },
-            booking.tollFee      && booking.tollFee > 0 && { label: 'Phí cầu đường', value: booking.tollFee },
-            booking.promoCode && booking.discountAmount > 0 ? {
-              label: `Mã ưu đãi (${booking.promoCode})`,
-              value: -booking.discountAmount
-            } : (booking.discountAmount && booking.discountAmount > 0 ? {
-              label: 'Giảm giá',
-              value: -booking.discountAmount
-            } : null),
-          ].filter(Boolean).map((row: any, idx: number) => (
-            <View key={idx} style={styles.priceRow}>
-              <Text style={styles.priceLabel}>{row.label}</Text>
-              <Text style={[styles.priceValue, row.value < 0 && { color: '#10B981', fontWeight: '800' }]}>
-                {row.value < 0 ? `-${formatVND(Math.abs(row.value))}` : formatVND(row.value)}
-              </Text>
-            </View>
-          ))}
-
-          {/* Fallback indicator */}
-          {booking.distanceSource === 'fallback' && (
-            <View style={styles.fallbackNote}>
-              <Info size={12} color="#F59E0B" />
-              <Text style={styles.fallbackNoteText}>Khoảng cách ước tính (Mapbox không khả dụng)</Text>
-            </View>
-          )}
-
-          <View style={styles.priceDivider} />
-          <View style={styles.totalRow}>
-            <Text style={styles.totalLabel}>Tổng thanh toán</Text>
-            <Text style={styles.totalAmount}>
-              {formatVND(booking.estimatedFare ?? booking.finalFare ?? booking.amount ?? 0)}
-            </Text>
-          </View>
-
-          {/* Quote info for disputes */}
-          {(booking.quoteId || booking.estimateId) && (
-            <View style={styles.quoteInfo}>
-              {booking.quoteId && (
-                <Text style={styles.quoteIdText}>Mã báo giá: {booking.quoteId}</Text>
-              )}
-              {booking.estimateId && booking.estimateId !== 'fallback' && (
-                <Text style={styles.estimateIdText}>ID ước tính: {booking.estimateId.substring(0, 16)}...</Text>
-              )}
-            </View>
-          )}
-        </View>
-
-        {/* ── Status Card ──────────────────────────────────────── */}
+        {/* 1. Trạng thái Card */}
         <View style={styles.card}>
           <View style={styles.statusRow}>
             <Text style={styles.statusLabel}>Trạng thái</Text>
@@ -397,10 +304,10 @@ export default function RideDetailScreen() {
           </View>
         </View>
 
-        {/* Route Card */}
+        {/* 2. Hành trình Card */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Hành trình</Text>
-          
+
           <View style={styles.routeRow}>
             <View style={styles.iconCol}>
               <View style={styles.pickupDot} />
@@ -423,10 +330,10 @@ export default function RideDetailScreen() {
           </View>
         </View>
 
-        {/* Ride Information */}
+        {/* 3. Thông tin dịch vụ Card */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Thông tin dịch vụ</Text>
-          
+
           <View style={styles.infoRow}>
             <View style={styles.infoIconWrapper}>
               {booking.vehicleType === 'BIKE' ? <Bike size={20} color="#666" /> : <Car size={20} color="#666" />}
@@ -514,7 +421,7 @@ export default function RideDetailScreen() {
           )}
         </View>
 
-        {/* Driver Section */}
+        {/* 4. Thông tin tài xế Card */}
         <View style={styles.card}>
           <Text style={styles.cardTitle}>Thông tin tài xế</Text>
           <View style={styles.driverRow}>
@@ -543,26 +450,117 @@ export default function RideDetailScreen() {
           </View>
         </View>
 
-        {/* Dynamic Interactive Review Section */}
+        {/* 5. Chi tiết giá Card (MOVED TO BOTTOM & REFORMATTED) */}
+        <View style={styles.card}>
+          <Text style={styles.cardTitle}>Chi tiết giá</Text>
+
+          {/* Tags for Payment Method and Promo next to each other */}
+          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8, marginBottom: 16 }}>
+            {booking.paymentMethod !== 'CASH' ? (
+              <View style={{ backgroundColor: '#2563EB', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}>
+                <Text style={{ color: '#FFF', fontSize: 11, fontWeight: 'bold' }}>Thẻ / Ví</Text>
+              </View>
+            ) : (
+              <View style={{ backgroundColor: '#10B981', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6 }}>
+                <Text style={{ color: '#FFF', fontSize: 11, fontWeight: 'bold' }}>Tiền mặt</Text>
+              </View>
+            )}
+
+            {(booking.promoCode || booking.discountAmount > 0) && (
+              <View style={{ backgroundColor: '#E5E7EB', paddingHorizontal: 10, paddingVertical: 5, borderRadius: 6, borderWidth: 1, borderColor: '#D1D5DB' }}>
+                <Text style={{ color: '#374151', fontSize: 11, fontWeight: 'bold' }}>Khuyến mãi</Text>
+              </View>
+            )}
+          </View>
+
+          {/* Surge multiplier indicator */}
+          {(() => {
+            const surgeValue = booking.estimateSurge ?? booking.surgeMultiplier ?? 1.0;
+            return surgeValue > 1.0 ? (
+              <View style={[styles.surgeRow, { backgroundColor: getSurgeColor(surgeValue) + '12' }]}>
+                <View style={styles.surgeLeft}>
+                  <Zap size={14} color={getSurgeColor(surgeValue)} />
+                  <Text style={[styles.surgeRowLabel, { color: getSurgeColor(surgeValue) }]}>
+                    Cước cao điểm
+                  </Text>
+                </View>
+                <Text style={[styles.surgeRowValue, { color: getSurgeColor(surgeValue) }]}>
+                  ×{surgeValue.toFixed(1)} {getSurgeLabel(surgeValue)}
+                </Text>
+              </View>
+            ) : null;
+          })()}
+
+          {/* Re-arranged Price breakdown rows */}
+          <View style={styles.priceRow}>
+            <Text style={styles.priceLabel}>Giá cước gốc ước tính</Text>
+            <Text style={styles.priceValue}>
+              {formatVND((booking.baseFare ?? booking.estimatedFare ?? 0) + (booking.discountAmount ?? 0))}
+            </Text>
+          </View>
+
+          {booking.discountAmount > 0 && (
+            <View style={styles.priceRow}>
+              <Text style={styles.priceLabel}>Mã ưu đãi giảm giá ({booking.promoCode || 'Khuyến mãi'})</Text>
+              <Text style={[styles.priceValue, { color: '#10B981', fontWeight: 'bold' }]}>
+                -{formatVND(booking.discountAmount)}
+              </Text>
+            </View>
+          )}
+
+          <View style={styles.priceDivider} />
+
+          <View style={styles.totalRow}>
+            <Text style={styles.totalLabel}>Giá cuối (Phải thanh toán)</Text>
+            <Text style={styles.totalAmount}>
+              {formatVND(booking.estimatedFare ?? booking.finalFare ?? booking.amount ?? 0)}
+            </Text>
+          </View>
+
+          <View style={{ marginTop: 10, padding: 10, backgroundColor: '#F3F4F6', borderRadius: 8 }}>
+            <Text style={{ fontSize: 12, color: '#374151', lineHeight: 18 }}>
+              • <Text style={{ fontWeight: 'bold' }}>Phương thức: </Text>
+              {booking.paymentMethod === 'CASH' ? 'Thanh toán tiền mặt' : 'Thanh toán qua Thẻ/Ví điện tử'}
+            </Text>
+            <Text style={{ fontSize: 12, color: '#374151', lineHeight: 18, marginTop: 4 }}>
+              • <Text style={{ fontWeight: 'bold' }}>Số tiền phải trả: </Text>
+              {formatVND(booking.estimatedFare ?? booking.finalFare ?? booking.amount ?? 0)}
+            </Text>
+          </View>
+
+          {/* Route distance and duration info */}
+          <View style={[styles.routeInfoRow, { marginTop: 14, borderTopWidth: 1, borderTopColor: '#F3F4F6', paddingTop: 12 }]}>
+            <View style={styles.routeInfoItem}>
+              <Route size={14} color="#6366F1" />
+              <Text style={styles.routeInfoText}>Quãng đường: {booking.distanceKm ? `${parseFloat(booking.distanceKm).toFixed(1)} km` : '—'}</Text>
+            </View>
+            <View style={styles.routeInfoItem}>
+              <Clock size={14} color="#6366F1" />
+              <Text style={styles.routeInfoText}>Thời gian: {booking.durationMinutes ? `~${booking.durationMinutes} phút` : '—'}</Text>
+            </View>
+          </View>
+        </View>
+
+        {/* 6. Dynamic Interactive Review Section */}
         {booking.status === 'COMPLETED' && (
           <View style={[styles.card, styles.reviewCard]}>
             <Text style={styles.cardTitle}>Đánh giá chuyến đi này</Text>
-            
+
             {isReviewed ? (
               <View style={styles.reviewedContainer}>
                 <Text style={styles.reviewedTitle}>Cảm ơn bạn đã gửi đánh giá! ❤️</Text>
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((s) => (
-                    <Star 
-                      key={s} 
-                      size={28} 
-                      color="#FBBF24" 
-                      fill={s <= rating ? '#FBBF24' : 'transparent'} 
+                    <Star
+                      key={s}
+                      size={28}
+                      color="#FBBF24"
+                      fill={s <= rating ? '#FBBF24' : 'transparent'}
                       style={{ marginHorizontal: 2 }}
                     />
                   ))}
                 </View>
-                
+
                 {selectedTags.length > 0 && (
                   <View style={styles.reviewedTagsContainer}>
                     {selectedTags.map((tag, idx) => (
@@ -585,10 +583,10 @@ export default function RideDetailScreen() {
                 <View style={styles.starsRow}>
                   {[1, 2, 3, 4, 5].map((s) => (
                     <TouchableOpacity key={s} onPress={() => setRating(s)} activeOpacity={0.7}>
-                      <Star 
-                        size={36} 
-                        color="#FBBF24" 
-                        fill={s <= rating ? '#FBBF24' : 'transparent'} 
+                      <Star
+                        size={36}
+                        color="#FBBF24"
+                        fill={s <= rating ? '#FBBF24' : 'transparent'}
                         style={{ marginHorizontal: 6 }}
                       />
                     </TouchableOpacity>
@@ -633,7 +631,7 @@ export default function RideDetailScreen() {
           </View>
         )}
 
-        {/* Metadata section */}
+        {/* 7. Metadata Section */}
         <View style={styles.metadataContainer}>
           <Text style={styles.metadataText}>Mã chuyến đi: {booking.id}</Text>
         </View>
