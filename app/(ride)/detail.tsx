@@ -293,19 +293,22 @@ export default function RideDetailScreen() {
           <Text style={styles.cardTitle}>Chi tiết giá</Text>
 
           {/* Surge indicator */}
-          {booking.estimateSurge && booking.estimateSurge > 1.0 && (
-            <View style={[styles.surgeRow, { backgroundColor: getSurgeColor(booking.estimateSurge) + '12' }]}>
-              <View style={styles.surgeLeft}>
-                <Zap size={14} color={getSurgeColor(booking.estimateSurge)} />
-                <Text style={[styles.surgeRowLabel, { color: getSurgeColor(booking.estimateSurge) }]}>
-                  Cước cao điểm
+          {(() => {
+            const surgeValue = booking.estimateSurge ?? booking.surgeMultiplier ?? 1.0;
+            return surgeValue > 1.0 ? (
+              <View style={[styles.surgeRow, { backgroundColor: getSurgeColor(surgeValue) + '12' }]}>
+                <View style={styles.surgeLeft}>
+                  <Zap size={14} color={getSurgeColor(surgeValue)} />
+                  <Text style={[styles.surgeRowLabel, { color: getSurgeColor(surgeValue) }]}>
+                    Cước cao điểm
+                  </Text>
+                </View>
+                <Text style={[styles.surgeRowValue, { color: getSurgeColor(surgeValue) }]}>
+                  ×{surgeValue.toFixed(1)} {getSurgeLabel(surgeValue)}
                 </Text>
               </View>
-              <Text style={[styles.surgeRowValue, { color: getSurgeColor(booking.estimateSurge) }]}>
-                ×{booking.estimateSurge.toFixed(1)} {getSurgeLabel(booking.estimateSurge)}
-              </Text>
-            </View>
-          )}
+            ) : null;
+          })()}
 
           {/* Route info */}
           {(booking.distanceKm || booking.durationMinutes) && (

@@ -380,10 +380,10 @@ export const PricingService = {
    *
    * Admin endpoint — requires ROLE_ADMIN or SCOPE_pricing:admin scope.
    */
-  async updateZoneSurge(zoneId: string, multiplier: number): Promise<ZoneSurgeResponse> {
+  async updateZoneSurge(zoneId: string, surgeMultiplier: number): Promise<ZoneSurgeResponse> {
     const response = await api.put<any>(
       `/api/v1/pricing/surge/${encodeURIComponent(zoneId)}`,
-      { multiplier }
+      { surgeMultiplier }
     );
     return mapZoneSurge(response.data);
   },
@@ -562,7 +562,8 @@ export function calculateFallbackFare(
   dropoffLat: number,
   dropoffLng: number,
   tier: VehicleTier = 'CAR4',
-  durationMinutes = 25
+  durationMinutes = 25,
+  surgeMultiplier: number = 1.0
 ): number {
   const R = 6371; // Earth radius in km
   const toRad = (deg: number) => (deg * Math.PI) / 180;
@@ -584,7 +585,7 @@ export function calculateFallbackFare(
     distanceKm * config.perKm +
     durationMinutes * config.perMinute +
     config.platformFee;
-  return Math.max(subtotal, config.minimumFare);
+  return Math.max(subtotal * surgeMultiplier, config.minimumFare);
 }
 
 /**

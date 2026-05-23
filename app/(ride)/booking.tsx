@@ -254,9 +254,19 @@ export default function BookingScreen() {
     if (activeSearch === 'pickup') {
       setPickup(item.place_name ?? item.text);
       setPickupCoords(coords);
+      console.log('[Booking] Pickup selected:', {
+        name: item.place_name ?? item.text,
+        lat: coords.latitude,
+        lng: coords.longitude,
+      });
     } else if (activeSearch === 'dropoff') {
       setDropoff(item.place_name ?? item.text);
       setDropoffCoords(coords);
+      console.log('[Booking] Dropoff selected:', {
+        name: item.place_name ?? item.text,
+        lat: coords.latitude,
+        lng: coords.longitude,
+      });
     }
     setSuggestions([]);
     setActiveSearch(null);
@@ -278,6 +288,11 @@ export default function BookingScreen() {
 
     try {
       // Fetch estimates for all 3 tiers in parallel
+      console.log('[Booking] Fetching estimates with coords:', {
+        pickup: { lat: pC.latitude, lng: pC.longitude },
+        dropoff: { lat: dC.latitude, lng: dC.longitude },
+        idempotencyKey,
+      });
       const [bike, car4, car7] = await Promise.all([
         PricingService.createEstimate(
           {
@@ -312,6 +327,13 @@ export default function BookingScreen() {
       ]);
 
       setEstimates({ BIKE: bike, CAR4: car4, CAR7: car7 });
+      console.log('[Booking] Estimates received:', {
+        bike:  { estimateId: bike.estimateId, totalFare: bike.totalFare },
+        car4:  { estimateId: car4.estimateId, totalFare: car4.totalFare },
+        car7:  { estimateId: car7.estimateId, totalFare: car7.totalFare },
+        quoteHashBike:  bike.quotePayloadHash,
+        quoteHashCar4:  car4.quotePayloadHash,
+      });
 
       // Start countdown from the CAR4 estimate expiry
       const remaining = getRemainingSeconds(car4.expiresAt);
@@ -322,6 +344,8 @@ export default function BookingScreen() {
       setEstimateError('Không lấy được giá ước tính. Sử dụng giá mặc định.');
 
       // Fallback: calculate locally for all tiers
+      // NOTE: Booking will fail if backend requires non-blank quotePayloadHash.
+      // This fallback only works if BookingService is relaxed about quote verification.
       const fallbackEst = (fare: number, tier: VehicleTier): FareEstimateResponse => ({
         estimateId:       'fallback',
         pickupZone:       'unknown',
@@ -341,11 +365,11 @@ export default function BookingScreen() {
         totalFare:        fare,
         currency:         'VND',
         pricingConfigVersion: '1',
-        distanceSource:   'fallback',
+        distanceSource:   'HAVERSINE_FALLBACK',
         weatherCondition: 'unknown',
         weatherSource:    'fallback',
         fallbackUsed:     true,
-        expiresAt:        new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+        expiresAt:        new Date(Date.now() + 15 * 60 * 1000).toISOString(),
         status:           'PENDING',
         quoteId:          'FALLBACK',
         quotePayloadHash: '',
@@ -353,9 +377,9 @@ export default function BookingScreen() {
         message:          'Giá ước tính (fallback)',
       });
 
-      const bikeFare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'BIKE', 25);
-      const car4Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR4', 25);
-      const car7Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR7', 25);
+      const bikeFare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'BIKE', 25, surgeMultiplier);
+      const car4Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR4', 25, surgeMultiplier);
+      const car7Fare    = calculateFallbackFare(pC.latitude, pC.longitude, dC.latitude, dC.longitude, 'CAR7', 25, surgeMultiplier);
 
       setEstimates({
         BIKE: fallbackEst(bikeFare,  'BIKE'),
@@ -435,11 +459,18 @@ export default function BookingScreen() {
         paymentMethod,
         estimatedFare: finalFare,
         promoCode:     selectedPromo ? selectedPromo.code : '',
-        quoteToken:    est?.estimateId ?? '',
+        // Both fields are required by BookingService.confirmQuoteBeforeBooking()
+        estimateId:        est?.estimateId ?? '',
+        quotePayloadHash:   est?.quotePayloadHash ?? '',
+        surgeMultiplier:    surgeMultiplier,
         idempotencyKey,
       };
 
+      console.log('[Booking] Request payload:', JSON.stringify(bookingRequest, null, 2));
+
       const response = await api.post('/api/v1/bookings', bookingRequest);
+      console.log('[Booking] Response:', response.status, JSON.stringify(response.data, null, 2));
+
       const isSuccess =
         response.data?.code === 200 || response.data?.code === 201
         || (response.status >= 200 && response.status < 300 && response.data?.result);
