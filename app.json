@@ -9,7 +9,14 @@
     "userInterfaceStyle": "automatic",
     "newArchEnabled": true,
     "ios": {
-      "supportsTablet": true
+      "supportsTablet": true,
+      "infoPlist": {
+        "LSApplicationQueriesSchemes": [
+          "zalopay",
+          "zalopay.api.v2",
+          "momo"
+        ]
+      }
     },
     "android": {
       "adaptiveIcon": {

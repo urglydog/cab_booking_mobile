@@ -1,6 +1,7 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import api from './api';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -171,26 +172,50 @@ export const PaymentService = {
    * - Trên standalone app: dismissBrowser() đóng Chrome Custom Tab
    * - Trên Expo Go: vẫn nhận callbackUrl để xử lý kết quả
    *
-   * MoMo/ZaloPay: Dùng Linking.openURL (deeplink app-to-app)
+   * MoMo/ZaloPay: Ưu tiên dùng deeplink (deeplink/deeplinkWallet) để mở app ví trực tiếp.
+   * Nếu không mở được → dùng payUrl với openBrowserAsync trên iOS.
    */
   async openPaymentGateway(payment: PaymentInitResponse): Promise<{ type: 'DEEPLINK' | 'WEB' | 'QR'; url?: string; callbackUrl?: string }> {
-    // Ưu tiên 1: Deep link (MoMo / ZaloPay) — mở app riêng
-    if (payment.deeplink) {
-      const canOpen = await Linking.canOpenURL(payment.deeplink);
-      if (canOpen) {
-        await Linking.openURL(payment.deeplink);
-        return { type: 'DEEPLINK', url: payment.deeplink };
+    console.log('[PaymentService] openPaymentGateway payment data:', {
+      hasDeeplink: !!payment.deeplink,
+      hasDeeplinkWallet: !!payment.deeplinkWallet,
+      hasPayUrl: !!payment.payUrl,
+      hasQrCodeUrl: !!payment.qrCodeUrl,
+      paymentMethod: payment.paymentMethod,
+      deeplink: payment.deeplink,
+      deeplinkWallet: payment.deeplinkWallet,
+    });
+    const deepLinks = [payment.deeplink, payment.deeplinkWallet].filter(Boolean);
+    for (const deepLink of deepLinks) {
+      if (deepLink) {
+        console.log('[PaymentService] Trying deep link:', deepLink);
+        const canOpen = await Linking.canOpenURL(deepLink);
+        if (canOpen) {
+          console.log('[PaymentService] Opening app via deeplink:', deepLink);
+          await Linking.openURL(deepLink);
+          return { type: 'DEEPLINK', url: deepLink };
+        }
+        console.warn('[PaymentService] Cannot open deeplink (may need app installed or rebuild):', deepLink);
       }
-      console.warn('[PaymentService] Cannot open deeplink:', payment.deeplink);
     }
 
     // Ưu tiên 2: Web URL (VNPay / trình duyệt)
     if (payment.payUrl) {
       try {
-        // Dùng openAuthSessionAsync để:
-        // 1. Mở Chrome Custom Tab với VNPay
-        // 2. CHỜ cho đến khi user hoàn tất thanh toán và redirect xảy ra
-        // 3. Resolve với callbackUrl chứa kết quả thanh toán
+        // Trên iOS với ZaloPay/MoMo: dùng openBrowserAsync (SFSafariViewController)
+        // để tránh ASWebAuthenticationSession sandbox chặn redirect sang app ví
+        const isAppToAppWallet = payment.paymentMethod === 'ZALOPAY' || payment.paymentMethod === 'MOMO';
+
+        if (Platform.OS === 'ios' && isAppToAppWallet) {
+          await WebBrowser.openBrowserAsync(payment.payUrl, {
+            toolbarColor: '#6366F1',
+            controlsColor: '#FFFFFF',
+            showInRecents: true,
+          });
+          return { type: 'WEB', url: payment.payUrl, callbackUrl: undefined };
+        }
+
+        // VNPay hoặc Android: dùng openAuthSessionAsync để nhận redirect callback
         const result = await WebBrowser.openAuthSessionAsync(
           payment.payUrl,
           MOBILE_PAYMENT_RETURN_URL,
