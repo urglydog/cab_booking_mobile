@@ -8,6 +8,20 @@ import { useSocket } from '@/hooks/useSocket';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
+const inferRideUiStatus = (payload: any) => {
+  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
+  const title = String(payload?.title ?? '').toLowerCase();
+  const message = String(payload?.message ?? '').toLowerCase();
+
+  if (['MATCHING', 'CREATED'].includes(rawStatus) || message.includes('tìm tài xế')) return 'MATCHING';
+  if (rawStatus === 'ASSIGNED') return 'ASSIGNED';
+  if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP' || title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
+  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'IN_PROGRESS';
+  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
+  if (rawStatus === 'CANCELLED' || title.includes('hủy') || message.includes('hủy')) return 'CANCELLED';
+  return undefined;
+};
+
 const formatVND = (num: number) => {
   return (num || 0).toLocaleString('vi-VN') + 'đ';
 };
@@ -70,6 +84,7 @@ export default function HomeScreen() {
   const { socket, unreadCount, setUnreadCount } = useSocket();
   const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = useState<any[]>([]);
+  const [bookingStatusOverrides, setBookingStatusOverrides] = useState<Record<string, string>>({});
   const [showTrackingModal, setShowTrackingModal] = useState(false);
 
   // Promo Carousel State & Animation
@@ -119,12 +134,35 @@ export default function HomeScreen() {
     fetchDashboardData();
 
     if (socket) {
-      socket.on('new_notification', (data: any) => {
-        setLatestNotification(translateNotificationMessage(data.message || 'Cập nhật mới cho chuyến đi của bạn!'));
+      const handleUpdate = (data: any) => {
+        const inferredStatus = inferRideUiStatus(data);
+        const bookingKey = String(
+          data?.bookingId ??
+          data?.rideId ??
+          (String(data?.userId ?? '').startsWith('ROOM_') ? String(data?.userId).replace(/^ROOM_/, '') : '')
+        ).trim();
+
+        if (bookingKey && inferredStatus) {
+          setBookingStatusOverrides((prev) => ({
+            ...prev,
+            [bookingKey]: inferredStatus,
+          }));
+
+          if (['COMPLETED', 'CANCELLED'].includes(inferredStatus)) {
+            setShowTrackingModal(false);
+          }
+        }
+
+        setLatestNotification(translateNotificationMessage(data?.message || data?.title || 'Cập nhật mới cho chuyến đi của bạn!'));
         fetchDashboardData();
-      });
-      socket.on('booking_status_update', (data: any) => {
-        fetchDashboardData();
+      };
+
+      socket.on('new_notification', handleUpdate);
+      socket.on('booking_status_update', handleUpdate);
+      socket.on('receive_message', (data: any) => {
+        if (data?.bookingId) {
+          fetchDashboardData();
+        }
       });
     }
 
@@ -187,11 +225,22 @@ export default function HomeScreen() {
       if (socket) {
         socket.off('new_notification');
         socket.off('booking_status_update');
+        socket.off('receive_message');
       }
       clearInterval(bannerTimer);
       clearInterval(suggestionTimer);
     };
   }, [socket]);
+
+  useEffect(() => {
+    if (!isActive) return;
+
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isActive]);
 
   const getStatusInVietnamese = (status: string) => {
     switch (status) {
@@ -211,7 +260,11 @@ export default function HomeScreen() {
 
   // Detect if the user has an active (in-progress) booking
   const ACTIVE_STATUSES = ['MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
-  const latestBooking = recentBookings.find((b: any) => ACTIVE_STATUSES.includes(b.status));
+  const normalizedBookings = recentBookings.map((booking: any) => ({
+    ...booking,
+    status: bookingStatusOverrides[String(booking.id)] || booking.status,
+  }));
+  const latestBooking = normalizedBookings.find((b: any) => ACTIVE_STATUSES.includes(String(b.status).toUpperCase()));
   const isActive = !!latestBooking;
 
   return (
