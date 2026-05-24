@@ -9,6 +9,7 @@ import {
   Alert,
   Share,
   Platform,
+  ScrollView,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
@@ -44,7 +45,7 @@ export default function PaymentScreen() {
           const paymentInfo = await PaymentService.initPayment({
             bookingId: bookingId as string,
             amount: Number(amount) || 0,
-            paymentMethod: (paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH') || 'VNPAY',
+            paymentMethod: (paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY' | 'CASH') || 'VNPAY',
           });
           router.replace({
             pathname: '/(payment)/payment',
@@ -82,6 +83,24 @@ export default function PaymentScreen() {
       if (payment) {
         setPaymentData(payment);
         setStatus(payment.status as PaymentStatus);
+
+        if (payment.status === 'SUCCESS') {
+          router.replace({
+            pathname: '/(ride)/matching',
+            params: { bookingId: bookingId as string },
+          });
+          return;
+        } else if (payment.status === 'FAILED_FINAL') {
+          router.replace({
+            pathname: '/(payment)/payment-failed',
+            params: {
+              transactionId: transactionId as string,
+              bookingId: bookingId as string,
+              reason: 'Thanh toán thất bại sau nhiều lần thử',
+            },
+          });
+          return;
+        }
       }
 
       // Start polling for status updates
@@ -170,11 +189,12 @@ export default function PaymentScreen() {
 
   // Auto-open gateway when payment info is loaded with a payUrl/deeplink/deeplinkWallet
   useEffect(() => {
+    if (paymentData?.paymentMethod === 'SEPAY') return; // Don't auto-open browser for SePay (VietQR code)
     if (paymentData?.payUrl || paymentData?.deeplink || paymentData?.deeplinkWallet) {
       const timer = setTimeout(handleOpenGateway, 800);
       return () => clearTimeout(timer);
     }
-  }, [paymentData?.payUrl, paymentData?.deeplink, paymentData?.deeplinkWallet]);
+  }, [paymentData?.payUrl, paymentData?.deeplink, paymentData?.deeplinkWallet, paymentData?.paymentMethod]);
 
   const handleCopyTransactionId = () => {
     Share.share({ message: `Mã giao dịch: ${transactionId}` });
@@ -194,6 +214,7 @@ export default function PaymentScreen() {
       MOMO: 'MoMo',
       ZALOPAY: 'ZaloPay',
       VNPAY: 'VNPay',
+      SEPAY: 'SePay (VietQR)',
       CASH: 'Tiền mặt',
     };
     return labels[method] || method;
@@ -204,6 +225,7 @@ export default function PaymentScreen() {
       MOMO: '#A50064',
       ZALOPAY: '#0068FF',
       VNPAY: '#AA2B52',
+      SEPAY: '#FF5E00',
       CASH: '#10B981',
     };
     return colors[method] || '#6366F1';
@@ -227,7 +249,7 @@ export default function PaymentScreen() {
         <View style={{ width: 28 }} />
       </View>
 
-      <View style={styles.content}>
+      <ScrollView style={styles.content} contentContainerStyle={styles.scrollContent} showsVerticalScrollIndicator={false}>
         {/* Amount Card */}
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Số tiền thanh toán</Text>
@@ -259,35 +281,39 @@ export default function PaymentScreen() {
         {/* Status Area */}
         <View style={styles.statusArea}>
           {isPending ? (
-            <>
-              <ActivityIndicator size="large" color="#6366F1" />
-              <Text style={styles.statusTitle}>Đang xử lý thanh toán...</Text>
-              <Text style={styles.statusSubtitle}>
-                Vui lòng hoàn tất thanh toán trên ứng dụng {getMethodLabel(effectiveMethod)}.
-                Màn hình sẽ tự động cập nhật kết quả.
-              </Text>
-
-              {/* QR Code Display */}
-              {showQr && (
-                <View style={styles.qrContainer}>
-                  <Text style={styles.qrTitle}>Quét mã QR để thanh toán</Text>
+            showQr ? (
+              <View style={styles.qrMainContainer}>
+                <View style={styles.qrWrapper}>
                   <Image
                     source={{ uri: paymentData.qrCodeUrl }}
-                    style={styles.qrImage}
+                    style={styles.qrImageMain}
                     resizeMode="contain"
                   />
                 </View>
-              )}
+                <View style={styles.qrStatusRow}>
+                  <ActivityIndicator size="small" color={getMethodColor(effectiveMethod)} style={{ marginRight: 8 }} />
+                  <Text style={styles.qrStatusText}>Đang chờ quét mã thanh toán...</Text>
+                </View>
+              </View>
+            ) : (
+              <>
+                <ActivityIndicator size="large" color="#6366F1" />
+                <Text style={styles.statusTitle}>Đang xử lý thanh toán...</Text>
+                <Text style={styles.statusSubtitle}>
+                  Vui lòng hoàn tất thanh toán trên ứng dụng {getMethodLabel(effectiveMethod)}.
+                  Màn hình sẽ tự động cập nhật kết quả.
+                </Text>
 
-              {/* Open App Button */}
-              {showGatewayButton && (
-                <TouchableOpacity style={styles.openGatewayButton} onPress={handleOpenGateway}>
-                  <Text style={styles.openGatewayText}>
-                    Mở ứng dụng {getMethodLabel(effectiveMethod)}
-                  </Text>
-                </TouchableOpacity>
-              )}
-            </>
+                {/* Open App Button */}
+                {showGatewayButton && (
+                  <TouchableOpacity style={styles.openGatewayButton} onPress={handleOpenGateway}>
+                    <Text style={styles.openGatewayText}>
+                      Mở ứng dụng {getMethodLabel(effectiveMethod)}
+                    </Text>
+                  </TouchableOpacity>
+                )}
+              </>
+            )
           ) : isSuccess ? (
             <>
               <CheckCircle size={80} color="#10B981" />
@@ -318,12 +344,22 @@ export default function PaymentScreen() {
         <View style={styles.instructionsCard}>
           <Text style={styles.instructionsTitle}>Hướng dẫn</Text>
           <Text style={styles.instructionsText}>
-            1. Mở ứng dụng {getMethodLabel(effectiveMethod)} trên điện thoại.{'\n'}
-            2. Quét mã QR hoặc xác nhận thanh toán.{'\n'}
-            3. Hoàn tất và quay lại ứng dụng để xem kết quả.
+            {effectiveMethod === 'SEPAY' ? (
+              <>
+                1. Mở ứng dụng ngân hàng hoặc ví điện tử bất kỳ.{'\n'}
+                2. Chọn chức năng quét mã QR và quét mã ở trên.{'\n'}
+                3. Hệ thống sẽ tự động chuyển màn hình khi nhận được thanh toán.
+              </>
+            ) : (
+              <>
+                1. Mở ứng dụng {getMethodLabel(effectiveMethod)} trên điện thoại.{'\n'}
+                2. Quét mã QR hoặc xác nhận thanh toán.{'\n'}
+                3. Hoàn tất và quay lại ứng dụng để xem kết quả.
+              </>
+            )}
           </Text>
         </View>
-      </View>
+      </ScrollView>
 
       {/* Bottom Actions */}
       <View style={styles.bottomActions}>
@@ -361,7 +397,53 @@ const styles = StyleSheet.create({
   },
   content: {
     flex: 1,
+  },
+  scrollContent: {
     padding: 20,
+    paddingBottom: 40,
+  },
+  qrMainContainer: {
+    alignItems: 'center',
+    marginVertical: 12,
+    width: '100%',
+  },
+  qrWrapper: {
+    backgroundColor: '#fff',
+    borderRadius: 20,
+    padding: 16,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 4 },
+    shadowOpacity: 0.1,
+    shadowRadius: 12,
+    elevation: 6,
+    borderWidth: 1,
+    borderColor: '#E2E8F0',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  qrImageMain: {
+    width: 220,
+    height: 220,
+  },
+  qrStatusRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 16,
+    backgroundColor: '#fff',
+    paddingVertical: 10,
+    paddingHorizontal: 20,
+    borderRadius: 30,
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.05,
+    shadowRadius: 4,
+    elevation: 2,
+  },
+  qrStatusText: {
+    fontSize: 14,
+    color: '#475569',
+    fontWeight: '600',
   },
   amountCard: {
     backgroundColor: '#fff',
