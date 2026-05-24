@@ -366,16 +366,28 @@ export default function BookingScreen() {
       console.error('Pricing estimate error:', err?.response?.data ?? err);
       setEstimateError('Không lấy được giá ước tính. Sử dụng giá mặc định.');
 
-      // Fallback: calculate locally for all tiers
-      // NOTE: Booking will fail if backend requires non-blank quotePayloadHash.
-      // This fallback only works if BookingService is relaxed about quote verification.
+      // Fallback: calculate locally for all tiers using Haversine
+      const R = 6371; // Earth radius in km
+      const toRad = (deg: number) => (deg * Math.PI) / 180;
+      const dLat = toRad(dC.latitude - pC.latitude);
+      const dLng = toRad(dC.longitude - pC.longitude);
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos(toRad(pC.latitude)) *
+          Math.cos(toRad(dC.latitude)) *
+          Math.sin(dLng / 2) *
+          Math.sin(dLng / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const dist = c * R * 1.25; // 25% curve adjustment
+      const durationVal = Math.max(3, Math.round(dist * 2.5 + 1));
+
       const fallbackEst = (fare: number, tier: VehicleTier): FareEstimateResponse => ({
         estimateId: 'fallback',
         pickupZone: 'unknown',
         dropoffZone: 'unknown',
         vehicleType: tier,
-        distanceKm: 0,
-        durationMinutes: 0,
+        distanceKm: dist,
+        durationMinutes: durationVal,
         baseFare: 0,
         distanceFare: 0,
         timeFare: 0,
