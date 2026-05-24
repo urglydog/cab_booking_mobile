@@ -3,6 +3,8 @@ import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from './api';
 
+WebBrowser.maybeCompleteAuthSession();
+
 export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH';
 
 export type PaymentStatus = 'INIT' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'RETRY' | 'FAILED_FINAL';
@@ -46,6 +48,10 @@ const PAYMENT_ERROR_MESSAGES: Record<string, string> = {
   TIMEOUT: 'Hết thời gian chờ. Vui lòng thử lại.',
 };
 
+export const MOBILE_PAYMENT_RETURN_URL = Linking.createURL('payment', {
+  scheme: 'cabbookingmobile',
+});
+
 export function getPaymentErrorMessage(errorCode: string, fallback?: string): string {
   return PAYMENT_ERROR_MESSAGES[errorCode] || fallback || 'Đã xảy ra lỗi. Vui lòng thử lại.';
 }
@@ -56,6 +62,61 @@ export function canRetryPayment(status: PaymentStatus): boolean {
 
 export function shouldRetryError(errorCode: string): boolean {
   return ['PAYMENT_002', 'PAYMENT_003', 'NETWORK_ERROR'].includes(errorCode);
+}
+
+/**
+ * Parse kết quả thanh toán từ URL callback.
+ *
+ * Hỗ trợ 2 loại URL:
+ * 1. VNPay return URL: https://scratch-heaving.../api/v1/payments/vnpay/return?vnp_ResponseCode=00&...
+ *    → Phân tích vnp_ResponseCode: "00" = thành công, khác = thất bại
+ * 2. Custom deep link: cabbookingmobile://payment?status=success&...
+ *    → Phân tích query params trực tiếp
+ *
+ * Sau khi user hoàn tất thanh toán VNPay trên browser:
+ * - Backend nhận returnUrl → processCallback() → redirect đến cabbookingmobile://
+ * - App được mở lại qua deep link → parseCallbackUrl() đọc kết quả
+ */
+export function parsePaymentCallbackUrl(url?: string): {
+  status?: string;
+  transactionId?: string;
+  bookingId?: string;
+  reason?: string;
+} | null {
+  if (!url) return null;
+
+  // Loại 1: VNPay return URL — parse query params trực tiếp
+  // Backend redirect đến: https://scratch-heaving.../api/v1/payments/vnpay/return?vnp_ResponseCode=00&...
+  // (Trước khi redirect sang cabbookingmobile://)
+  if (url.includes('/vnpay/return')) {
+    try {
+      const urlObj = new URL(url);
+      const responseCode = urlObj.searchParams.get('vnp_ResponseCode');
+      // VNPay responseCode "00" = thành công, "07" = user cancel, "09" = invalid card...
+      const success = responseCode === '00';
+      return {
+        status: success ? 'success' : 'failed',
+        reason: success ? undefined : `VNPay response: ${responseCode}`,
+      };
+    } catch {
+      // fallback
+    }
+  }
+
+  // Loại 2: Custom URL scheme cabbookingmobile://payment?status=success&...
+  const parsed = Linking.parse(url);
+  const paymentTarget = parsed.hostname || parsed.path?.split('/')[0];
+  if (!parsed.scheme?.startsWith('cabbooking') || paymentTarget !== 'payment') {
+    return null;
+  }
+
+  const params = parsed.queryParams || {};
+  return {
+    status: params.status as string | undefined,
+    transactionId: params.transactionId as string | undefined,
+    bookingId: params.bookingId as string | undefined,
+    reason: (params.message || params.reason) as string | undefined,
+  };
 }
 
 function generateIdempotencyKey(bookingId: string): string {
@@ -78,7 +139,7 @@ export const PaymentService = {
     const customerId = (await AsyncStorage.getItem('user_id')) || '';
     const idempotencyKey = generateIdempotencyKey(bookingId);
 
-    const response = await api.post('/api/payments/charge', {
+    const response = await api.post('/api/v1/payments/charge', {
       bookingId,
       customerId,
       amount,
@@ -88,7 +149,10 @@ export const PaymentService = {
       idempotencyKey,
     });
 
+    console.log('[PaymentService] initPayment response:', JSON.stringify(response.data, null, 2));
+
     if (response.data?.code !== 200) {
+      console.error('[PaymentService] initPayment error:', JSON.stringify(response.data, null, 2));
       throw {
         errorCode: response.data?.errorCode || 'PAYMENT_008',
         message: response.data?.errorMessage || 'Khởi tạo thanh toán thất bại',
@@ -100,28 +164,49 @@ export const PaymentService = {
 
   /**
    * Mở cổng thanh toán (deeplink / web / QR)
+   *
+   * VNPay: Dùng WebBrowser.openBrowserAsync vì:
+   * - VNPay redirect về returnUrl (web URL https://...)
+   * - Không dùng custom URL scheme như cabbookingmobile://
+   * - openBrowserAsync mở browser bình thường, user hoàn tất thanh toán và quay lại app
+   *
+   * MoMo/ZaloPay: Dùng Linking.openURL (deeplink app-to-app)
    */
-  async openPaymentGateway(payment: PaymentInitResponse): Promise<{ type: 'DEEPLINK' | 'WEB' | 'QR'; url?: string }> {
-    // Ưu tiên 1: Deep link (MoMo / ZaloPay)
+  async openPaymentGateway(payment: PaymentInitResponse): Promise<{ type: 'DEEPLINK' | 'WEB' | 'QR'; url?: string; callbackUrl?: string }> {
+    // Ưu tiên 1: Deep link (MoMo / ZaloPay) — mở app riêng
     if (payment.deeplink) {
       const canOpen = await Linking.canOpenURL(payment.deeplink);
       if (canOpen) {
         await Linking.openURL(payment.deeplink);
         return { type: 'DEEPLINK', url: payment.deeplink };
       }
+      console.warn('[PaymentService] Cannot open deeplink:', payment.deeplink);
     }
 
-    // Ưu tiên 2: Web URL (VNPay)
+    // Ưu tiên 2: Web URL (VNPay / trình duyệt)
     if (payment.payUrl) {
-      await WebBrowser.openBrowserAsync(payment.payUrl, {
-        toolbarColor: '#6366F1',
-        controlsColor: '#FFFFFF',
-        readerMode: false,
-      });
-      return { type: 'WEB', url: payment.payUrl };
+      // Dùng openAuthSessionAsync để capture redirect URL từ VNPay returnUrl
+      const result = await WebBrowser.openAuthSessionAsync(
+        payment.payUrl,
+        MOBILE_PAYMENT_RETURN_URL,
+        {
+          toolbarColor: '#6366F1',
+          controlsColor: '#FFFFFF',
+          readerMode: false,
+          showInRecents: true,
+        }
+      );
+
+      console.log('[PaymentService] openAuthSessionAsync result:', result);
+
+      // result.type: 'success' = redirect captured (user completed and was redirected back)
+      // result.type: 'cancel' = user closed browser without completing
+      const callbackUrl = result.type === 'success' ? result.url : undefined;
+
+      return { type: 'WEB', url: payment.payUrl, callbackUrl };
     }
 
-    // Ưu tiên 3: QR Code URL
+    // Ưu tiên 3: QR Code URL — hiển thị QR cho user quét
     if (payment.qrCodeUrl) {
       return { type: 'QR', url: payment.qrCodeUrl };
     }
@@ -134,30 +219,49 @@ export const PaymentService = {
 
   /**
    * Lấy thông tin giao dịch theo transactionId
+   * Được dùng bởi polling trong payment.tsx
+   * Backend: GET /api/v1/payments/txn/{transactionId}
    */
   async getPaymentStatus(transactionId: string): Promise<PaymentInitResponse | null> {
     try {
-      const response = await api.get(`/api/payments/txn/${transactionId}`);
-      if (response.data?.code === 200) {
-        return response.data.result as PaymentInitResponse;
+      const response = await api.get(`/api/v1/payments/txn/${transactionId}`);
+      const data = response.data?.result ?? response.data;
+      if (data && data.transactionId) {
+        return data as PaymentInitResponse;
       }
       return null;
-    } catch {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      if (status === 404) return null;
+      console.warn(`[PaymentService] getPaymentStatus(${transactionId}) error:`, err?.response?.data);
       return null;
     }
   },
 
   /**
    * Lấy thông tin thanh toán theo bookingId
+   * Được dùng bởi waitForPaymentByBooking trong booking.tsx
+   * Backend: GET /api/v1/payments/booking/{bookingId}
    */
   async getPaymentByBooking(bookingId: string): Promise<PaymentInitResponse | null> {
     try {
-      const response = await api.get(`/api/payments/booking/${bookingId}`);
-      if (response.data?.code === 200) {
-        return response.data.result as PaymentInitResponse;
+      const response = await api.get(`/api/v1/payments/booking/${bookingId}`);
+      console.log(`[PaymentService] getPaymentByBooking(${bookingId}):`, JSON.stringify(response.data, null, 2));
+      const data = response.data?.result ?? response.data;
+      if (data && data.transactionId) {
+        return data as PaymentInitResponse;
       }
+      console.log(`[PaymentService] getPaymentByBooking(${bookingId}): no transactionId in response`);
       return null;
-    } catch {
+    } catch (err: any) {
+      const status = err?.response?.status;
+      const errorData = err?.response?.data;
+      console.warn(`[PaymentService] getPaymentByBooking(${bookingId}) failed:`, {
+        status,
+        errorCode: errorData?.errorCode,
+        errorMessage: errorData?.errorMessage,
+      });
+      // 404 = chưa có transaction (bình thường trong lúc chờ Kafka), vẫn trả null để caller tiếp tục polling
       return null;
     }
   },

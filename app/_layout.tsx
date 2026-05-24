@@ -5,7 +5,6 @@ import { useEffect, useState, useRef } from 'react';
 import 'react-native-reanimated';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import * as Linking from 'expo-linking';
-import { Alert } from 'react-native';
 
 import { useColorScheme } from '@/hooks/use-color-scheme';
 
@@ -18,7 +17,7 @@ import { PaymentProvider } from '@/hooks/usePayment';
 
 function DeepLinkHandler() {
   const router = useRouter();
-  const hasHandledRef = useRef(false);
+  const lastHandledUrlRef = useRef<string | null>(null);
 
   useEffect(() => {
     // Handle deep link when app is opened from cold start
@@ -36,23 +35,24 @@ function DeepLinkHandler() {
   }, []);
 
   const handleURL = (event: { url: string }) => {
-    if (hasHandledRef.current) return;
     const { url } = event;
+    if (lastHandledUrlRef.current === url) return;
     const parsed = Linking.parse(url);
     const params = parsed.queryParams || {};
+    const paymentTarget = parsed.hostname || parsed.path?.split('/')[0];
 
     // cabbooking://payment?status=success&transactionId=xxx&bookingId=xxx
     // cabbookingmobile://payment?status=success&transactionId=xxx
-    if (parsed.scheme?.startsWith('cabbooking') && parsed.host === 'payment') {
-      hasHandledRef.current = true;
+    if (parsed.scheme?.startsWith('cabbooking') && paymentTarget === 'payment') {
+      lastHandledUrlRef.current = url;
       const status = params.status as string;
       const transactionId = params.transactionId as string;
       const bookingId = params.bookingId as string;
 
       if (status === 'success') {
         router.replace({
-          pathname: '/(payment)/payment-success',
-          params: { transactionId, bookingId: bookingId || '' },
+          pathname: '/(ride)/matching',
+          params: { bookingId: bookingId || '' },
         });
       } else if (status === 'failed' || status === 'cancelled') {
         router.replace({

@@ -10,6 +10,7 @@ import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PricingService, calculateFallbackFare } from '@/services/pricingService';
+import { PaymentInitResponse, PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 
 interface Message {
   id: string;
@@ -31,6 +32,17 @@ const PROMO_LIST = [
   { code: 'CABSUMMER', title: 'CAB Ngày nắng ☀️', discount: 15000, desc: 'Giảm trực tiếp 15.000đ du hí muôn nơi' },
   { code: 'CABVIP', title: 'CAB Tri ân VIP 💎', discount: 50000, desc: 'Mã VIP giảm giá cực khủng 50.000đ' },
 ];
+
+const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY'];
+
+const waitForPaymentByBooking = async (bookingId: string) => {
+  for (let attempt = 0; attempt < 6; attempt += 1) {
+    const paymentInfo = await PaymentService.getPaymentByBooking(bookingId);
+    if (paymentInfo?.transactionId) return paymentInfo;
+    await new Promise(resolve => setTimeout(resolve, 1000));
+  }
+  return null;
+};
 
 const FAMOUS_LOCATIONS: Record<string, { lat: number; lng: number; name: string }> = {
   'iuh': { lat: 10.822, lng: 106.687, name: 'Đại học Công nghiệp TP.HCM (IUH)' },
@@ -477,10 +489,56 @@ export default function AIChatScreen() {
       await AsyncStorage.setItem(`booking_promo_${bookingId}`, JSON.stringify(promoInfo));
 
       setIsBookingModalVisible(false);
+
+      if (ONLINE_PAYMENT_METHODS.includes(bookingDetails.payment)) {
+        let paymentInfo: PaymentInitResponse | null = null;
+
+        try {
+          paymentInfo = await waitForPaymentByBooking(bookingId);
+          if (!paymentInfo) {
+            Alert.alert('Chưa có giao dịch', 'Hệ thống chưa tạo được giao dịch thanh toán. Vui lòng thử lại sau.');
+            return;
+          }
+
+          const gatewayResult = await PaymentService.openPaymentGateway(paymentInfo);
+          const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
+          if (callback?.status === 'success') {
+            router.replace({
+              pathname: '/(ride)/matching',
+              params: { bookingId },
+            });
+            return;
+          }
+          if (callback?.status === 'failed' || callback?.status === 'cancelled') {
+            router.replace({
+              pathname: '/(payment)/payment-failed',
+              params: {
+                transactionId: callback.transactionId || paymentInfo.transactionId,
+                bookingId,
+                reason: callback.reason || 'Thanh toán không thành công',
+              },
+            });
+            return;
+          }
+        } catch (paymentError) {
+          console.warn('[AI Chat] Payment gateway opened or cancelled:', paymentError);
+        }
+
+        router.push({
+          pathname: '/(payment)/payment',
+          params: {
+            bookingId,
+            amount: finalFare.toString(),
+            paymentMethod: bookingDetails.payment,
+            transactionId: paymentInfo?.transactionId ?? '',
+          },
+        });
+        return;
+      }
       
       // Chuyển sang màn hình matching thật
       router.push({
-        pathname: '/matching',
+        pathname: '/(ride)/matching',
         params: {
           bookingId: bookingId,
           estimatedFare: finalFare.toString(),
@@ -679,7 +737,7 @@ export default function AIChatScreen() {
               </View>
             </View>
             <Text style={styles.voiceTitle}>Đang lắng nghe giọng nói...</Text>
-            <Text style={styles.voiceSub}>Hãy nói địa điểm của bạn (Ví dụ: "Đặt xe đi Landmark")</Text>
+            <Text style={styles.voiceSub}>Hãy nói địa điểm của bạn (Ví dụ: &quot;Đặt xe đi Landmark&quot;)</Text>
             <Text style={styles.voiceTimerText}>{voiceTimer}s</Text>
             <TouchableOpacity onPress={() => setIsVoiceModalVisible(false)} style={styles.voiceCancelBtn}>
               <Text style={styles.voiceCancelText}>Hủy bỏ</Text>
