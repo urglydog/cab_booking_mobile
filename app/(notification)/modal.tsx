@@ -31,7 +31,7 @@ const translateNotificationMessage = (message: string) => {
   if (message.includes('Finding the nearest driver') || message.includes('finding') || message.includes('tìm tài xế')) {
     return 'Đang tìm tài xế gần nhất cho bạn...';
   }
-  if (message.includes('Driver has arrived') || message.includes('arrived') || message.includes('đến điểm đón')) {
+  if (message.includes('Driver has arrived') || message.includes('arrived') || (message.includes('đến điểm đón') && !message.includes('đang đến'))) {
     return 'Tài xế đã đến điểm đón!';
   }
   if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
