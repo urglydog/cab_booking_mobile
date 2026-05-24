@@ -14,7 +14,11 @@ export const BASE_URL = isTunnel
   : `http://${IP_ADDRESS}:${GATEWAY_PORT}`;
 
 export const SOCKET_URL = isTunnel
-  ? (IP_ADDRESS.startsWith('http') ? IP_ADDRESS.replace('http', 'ws') : `wss://${IP_ADDRESS}`)
+  ? (IP_ADDRESS.startsWith('https')
+      ? IP_ADDRESS.replace('https', 'wss')
+      : IP_ADDRESS.startsWith('http')
+        ? IP_ADDRESS.replace('http', 'ws')
+        : `wss://${IP_ADDRESS}`)
   : `http://${IP_ADDRESS}:${SOCKET_PORT}`;
 
 const api = axios.create({

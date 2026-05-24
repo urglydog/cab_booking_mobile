@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback } from 'react';
+import React, { useEffect, useState, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -13,71 +13,163 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { ChevronLeft, CheckCircle, XCircle, QrCode, ExternalLink } from 'lucide-react-native';
-import { Colors } from '@/constants/Colors';
 import { usePayment } from '@/hooks/usePayment';
 import {
   PaymentService,
   PaymentStatus,
-  PaymentMethod,
   canRetryPayment,
+  parsePaymentCallbackUrl,
 } from '@/services/paymentService';
 
 export default function PaymentScreen() {
   const router = useRouter();
   const { transactionId, bookingId, amount, paymentMethod } = useLocalSearchParams();
-  const { currentPayment, isLoading, startPolling, stopPolling } = usePayment();
+  const { isLoading, startPolling, stopPolling } = usePayment();
 
   const [status, setStatus] = useState<PaymentStatus>('PENDING');
   const [isPolling, setIsPolling] = useState(false);
+  const [isFetchingPayment, setIsFetchingPayment] = useState(false);
+  const [paymentData, setPaymentData] = useState<PaymentInitResponse | null>(null);
+  const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Start polling when screen loads
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 1: Ensure we have a transactionId. If not, init directly.
+  // ────────────────────────────────────────────────────────────────────────────
+  useEffect(() => {
+    if (!transactionId && bookingId && !isFetchingPayment) {
+      setIsFetchingPayment(true);
+      (async () => {
+        try {
+          const paymentInfo = await PaymentService.initPayment({
+            bookingId: bookingId as string,
+            amount: Number(amount) || 0,
+            paymentMethod: (paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH') || 'VNPAY',
+          });
+          router.replace({
+            pathname: '/(payment)/payment',
+            params: {
+              bookingId: bookingId as string,
+              amount: amount as string,
+              paymentMethod: paymentMethod as string,
+              transactionId: paymentInfo.transactionId,
+            },
+          });
+        } catch {
+          Alert.alert('Lỗi', 'Không thể khởi tạo thanh toán. Vui lòng thử lại.');
+          router.back();
+        }
+      })();
+    }
+  }, [transactionId, bookingId, amount, paymentMethod, isFetchingPayment]);
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 2: Fetch current payment state and start polling.
+  // Flow: booking(PENDING_PAYMENT) -> payment.requested(Kafka) ->
+  //       PaymentService creates txn -> Customer pays -> payment.completed ->
+  //       Booking MATCHING -> matching.tsx
+  // ────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (!transactionId) return;
 
-    setIsPolling(true);
-    startPolling(transactionId as string, (newStatus, payment) => {
-      setStatus(newStatus as PaymentStatus);
-      if (newStatus === 'SUCCESS') {
-        setIsPolling(false);
+    let cancelled = false;
+
+    (async () => {
+      // Fetch current payment state directly (not via context — avoids stale closure issues)
+      const payment = await PaymentService.getPaymentStatus(transactionId as string);
+      if (cancelled) return;
+
+      if (payment) {
+        setPaymentData(payment);
+        setStatus(payment.status as PaymentStatus);
+      }
+
+      // Start polling for status updates
+      setIsPolling(true);
+
+      const pollInterval = setInterval(async () => {
+        const updated = await PaymentService.getPaymentStatus(transactionId as string);
+        if (!updated || cancelled) return;
+
+        setPaymentData(updated);
+        setStatus(updated.status as PaymentStatus);
+
+        if (updated.status === 'SUCCESS') {
+          clearInterval(pollInterval);
+          setIsPolling(false);
+          router.replace({
+            pathname: '/(ride)/matching',
+            params: { bookingId: bookingId as string },
+          });
+        } else if (updated.status === 'FAILED_FINAL') {
+          clearInterval(pollInterval);
+          setIsPolling(false);
+          router.replace({
+            pathname: '/(payment)/payment-failed',
+            params: {
+              transactionId: transactionId as string,
+              bookingId: bookingId as string,
+              reason: 'Thanh toán thất bại sau nhiều lần thử',
+            },
+          });
+        }
+      }, 3000);
+
+      // Store interval cleanup ref
+      pollingIntervalRef.current = pollInterval;
+    })();
+
+    return () => {
+      cancelled = true;
+      if (pollingIntervalRef.current) {
+        clearInterval(pollingIntervalRef.current);
+        pollingIntervalRef.current = null;
+      }
+    };
+  }, [transactionId, bookingId]);
+
+  // ────────────────────────────────────────────────────────────────────────────
+  // Step 3: Auto-open payment gateway when payUrl/deeplink is available
+  // (VNPay opens in browser via openAuthSessionAsync, MoMo/ZaloPay via deeplink)
+  // ────────────────────────────────────────────────────────────────────────────
+  const handleOpenGateway = async () => {
+    if (!paymentData) return;
+    try {
+      const gatewayResult = await PaymentService.openPaymentGateway(paymentData);
+      const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
+
+      if (callback?.status === 'success') {
         router.replace({
-          pathname: '/(payment)/payment-success',
-          params: { transactionId: transactionId as string, bookingId: bookingId as string },
+          pathname: '/(ride)/matching',
+          params: { bookingId: (callback.bookingId || bookingId) as string },
         });
-      } else if (newStatus === 'FAILED_FINAL') {
-        setIsPolling(false);
+      } else if (callback?.status === 'failed' || callback?.status === 'cancelled') {
         router.replace({
           pathname: '/(payment)/payment-failed',
           params: {
-            transactionId: transactionId as string,
-            bookingId: bookingId as string,
-            reason: 'Thanh toán thất bại sau nhiều lần thử',
+            transactionId: callback.transactionId || (transactionId as string),
+            bookingId: (callback.bookingId || bookingId) as string,
+            reason: callback.reason || 'Thanh toán không thành công',
           },
         });
       }
-    });
-
-    return () => {
-      stopPolling();
-    };
-  }, [transactionId]);
-
-  const handleOpenGateway = async () => {
-    if (!currentPayment) return;
-    try {
-      await PaymentService.openPaymentGateway(currentPayment);
     } catch (err: any) {
       Alert.alert('Lỗi', err?.message || 'Không thể mở cổng thanh toán');
     }
   };
 
+  // Auto-open gateway when payment info is loaded with a payUrl/deeplink
+  useEffect(() => {
+    if (paymentData?.payUrl || paymentData?.deeplink) {
+      const timer = setTimeout(handleOpenGateway, 800);
+      return () => clearTimeout(timer);
+    }
+  }, [paymentData?.payUrl, paymentData?.deeplink]);
+
   const handleCopyTransactionId = () => {
-    // Using Share as fallback for copy
-    Share.share({
-      message: `Mã giao dịch: ${transactionId}`,
-    });
+    Share.share({ message: `Mã giao dịch: ${transactionId}` });
   };
 
-  const handleRetry = async () => {
+  const handleRetry = () => {
     router.back();
   };
 
@@ -106,6 +198,13 @@ export default function PaymentScreen() {
     return colors[method] || '#6366F1';
   };
 
+  const effectiveMethod = paymentData?.paymentMethod || (paymentMethod as string) || 'VNPAY';
+  const isPending = isPolling || isLoading;
+  const isSuccess = status === 'SUCCESS';
+  const isFailed = status === 'FAILED' || status === 'FAILED_FINAL';
+  const showQr = paymentData?.qrCodeUrl;
+  const showGatewayButton = paymentData?.deeplink || paymentData?.payUrl;
+
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -122,11 +221,15 @@ export default function PaymentScreen() {
         <View style={styles.amountCard}>
           <Text style={styles.amountLabel}>Số tiền thanh toán</Text>
           <Text style={styles.amountValue}>
-            {amount ? `${Number(amount).toLocaleString()}đ` : (currentPayment?.amount?.toLocaleString() + 'đ') || '...'}
+            {amount
+              ? `${Number(amount).toLocaleString()}đ`
+              : paymentData?.amount
+                ? `${paymentData.amount.toLocaleString()}đ`
+                : '...'}
           </Text>
-          <View style={[styles.methodBadge, { backgroundColor: getMethodColor(currentPayment?.paymentMethod || (paymentMethod as string) || 'MOMO') + '15' }]}>
-            <Text style={[styles.methodBadgeText, { color: getMethodColor(currentPayment?.paymentMethod || (paymentMethod as string) || 'MOMO') }]}>
-              {getMethodLabel(currentPayment?.paymentMethod || (paymentMethod as string) || 'MOMO')}
+          <View style={[styles.methodBadge, { backgroundColor: getMethodColor(effectiveMethod) + '15' }]}>
+            <Text style={[styles.methodBadgeText, { color: getMethodColor(effectiveMethod) }]}>
+              {getMethodLabel(effectiveMethod)}
             </Text>
           </View>
         </View>
@@ -144,21 +247,21 @@ export default function PaymentScreen() {
 
         {/* Status Area */}
         <View style={styles.statusArea}>
-          {isLoading || isPolling ? (
+          {isPending ? (
             <>
               <ActivityIndicator size="large" color="#6366F1" />
               <Text style={styles.statusTitle}>Đang xử lý thanh toán...</Text>
               <Text style={styles.statusSubtitle}>
-                Vui lòng hoàn tất thanh toán trên ứng dụng {getMethodLabel(currentPayment?.paymentMethod || (paymentMethod as string) || '')}.
+                Vui lòng hoàn tất thanh toán trên ứng dụng {getMethodLabel(effectiveMethod)}.
                 Màn hình sẽ tự động cập nhật kết quả.
               </Text>
 
               {/* QR Code Display */}
-              {currentPayment?.qrCodeUrl && (
+              {showQr && (
                 <View style={styles.qrContainer}>
                   <Text style={styles.qrTitle}>Quét mã QR để thanh toán</Text>
                   <Image
-                    source={{ uri: currentPayment.qrCodeUrl }}
+                    source={{ uri: paymentData.qrCodeUrl }}
                     style={styles.qrImage}
                     resizeMode="contain"
                   />
@@ -166,20 +269,20 @@ export default function PaymentScreen() {
               )}
 
               {/* Open App Button */}
-              {(currentPayment?.deeplink || currentPayment?.payUrl) && (
+              {showGatewayButton && (
                 <TouchableOpacity style={styles.openGatewayButton} onPress={handleOpenGateway}>
                   <Text style={styles.openGatewayText}>
-                    Mở ứng dụng {getMethodLabel(currentPayment.paymentMethod)}
+                    Mở ứng dụng {getMethodLabel(effectiveMethod)}
                   </Text>
                 </TouchableOpacity>
               )}
             </>
-          ) : status === 'SUCCESS' ? (
+          ) : isSuccess ? (
             <>
               <CheckCircle size={80} color="#10B981" />
               <Text style={[styles.statusTitle, { color: '#10B981' }]}>Thanh toán thành công!</Text>
             </>
-          ) : status === 'FAILED' || status === 'FAILED_FINAL' ? (
+          ) : isFailed ? (
             <>
               <XCircle size={80} color="#EF4444" />
               <Text style={[styles.statusTitle, { color: '#EF4444' }]}>Thanh toán thất bại</Text>
@@ -204,7 +307,7 @@ export default function PaymentScreen() {
         <View style={styles.instructionsCard}>
           <Text style={styles.instructionsTitle}>Hướng dẫn</Text>
           <Text style={styles.instructionsText}>
-            1. Mở ứng dụng {getMethodLabel(currentPayment?.paymentMethod || (paymentMethod as string) || 'MoMo/ZaloPay')} trên điện thoại.{'\n'}
+            1. Mở ứng dụng {getMethodLabel(effectiveMethod)} trên điện thoại.{'\n'}
             2. Quét mã QR hoặc xác nhận thanh toán.{'\n'}
             3. Hoàn tất và quay lại ứng dụng để xem kết quả.
           </Text>
