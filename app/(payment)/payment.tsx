@@ -129,29 +129,39 @@ export default function PaymentScreen() {
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 3: Auto-open payment gateway when payUrl/deeplink is available
-  // (VNPay opens in browser via openAuthSessionAsync, MoMo/ZaloPay via deeplink)
+  // VNPay: openAuthSessionAsync chờ redirect trước khi resolve
+  // MoMo/ZaloPay: deeplink mở app riêng
   // ────────────────────────────────────────────────────────────────────────────
   const handleOpenGateway = async () => {
     if (!paymentData) return;
     try {
       const gatewayResult = await PaymentService.openPaymentGateway(paymentData);
-      const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
 
-      if (callback?.status === 'success') {
-        router.replace({
-          pathname: '/(ride)/matching',
-          params: { bookingId: (callback.bookingId || bookingId) as string },
-        });
-      } else if (callback?.status === 'failed' || callback?.status === 'cancelled') {
-        router.replace({
-          pathname: '/(payment)/payment-failed',
-          params: {
-            transactionId: callback.transactionId || (transactionId as string),
-            bookingId: (callback.bookingId || bookingId) as string,
-            reason: callback.reason || 'Thanh toán không thành công',
-          },
-        });
+      // openAuthSessionAsync đã resolve -> xử lý callbackUrl nếu có
+      if (gatewayResult.callbackUrl) {
+        const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
+        if (callback?.status === 'success') {
+          router.replace({
+            pathname: '/(ride)/matching',
+            params: { bookingId: (callback.bookingId || bookingId) as string },
+          });
+          return;
+        } else if (callback?.status === 'failed' || callback?.status === 'cancelled') {
+          router.replace({
+            pathname: '/(payment)/payment-failed',
+            params: {
+              transactionId: callback.transactionId || (transactionId as string),
+              bookingId: (callback.bookingId || bookingId) as string,
+              reason: callback.reason || 'Thanh toán không thành công',
+            },
+          });
+          return;
+        }
       }
+
+      // Không có callbackUrl -> browser đã mở, chờ redirect và app quay lại
+      // (Polling sẽ tự động phát hiện thanh toán thành công)
+      console.log('[PaymentScreen] Browser opened, waiting for payment redirect...');
     } catch (err: any) {
       Alert.alert('Lỗi', err?.message || 'Không thể mở cổng thanh toán');
     }
