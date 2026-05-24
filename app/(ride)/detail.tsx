@@ -8,6 +8,7 @@ import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { usePayment } from '@/hooks/usePayment';
 import { PaymentService, PaymentMethod } from '@/services/paymentService';
+import { useSocket } from '@/hooks/useSocket';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 
 const REVIEW_TAGS = [
@@ -22,6 +23,7 @@ const REVIEW_TAGS = [
 export default function RideDetailScreen() {
   const { bookingId } = useLocalSearchParams();
   const router = useRouter();
+  const { socket } = useSocket();
   const { initPayment } = usePayment();
   const [booking, setBooking] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -136,6 +138,41 @@ export default function RideDetailScreen() {
       fetchBookingDetail();
     }
   }, [bookingId]);
+
+  useEffect(() => {
+    if (!bookingId) return;
+
+    const refreshBookingDetail = () => {
+      fetchBookingDetail();
+    };
+
+    if (socket) {
+      socket.on('new_notification', refreshBookingDetail);
+      socket.on('booking_status_update', refreshBookingDetail);
+    }
+
+    return () => {
+      if (socket) {
+        socket.off('new_notification', refreshBookingDetail);
+        socket.off('booking_status_update', refreshBookingDetail);
+      }
+    };
+  }, [socket, bookingId]);
+
+  useEffect(() => {
+    if (!bookingId) return;
+
+    const terminalStatuses = ['COMPLETED', 'CANCELLED', 'PAID'];
+    if (booking?.status && terminalStatuses.includes(String(booking.status).toUpperCase())) {
+      return;
+    }
+
+    const interval = setInterval(() => {
+      fetchBookingDetail();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [bookingId, booking?.status]);
 
   const getStatusInVietnamese = (status: string) => {
     switch (status) {

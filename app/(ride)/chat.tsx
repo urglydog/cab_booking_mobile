@@ -22,9 +22,10 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const flatListRef = useRef<FlatList>(null);
+  const roomId = String(bookingId ?? '');
 
   useEffect(() => {
-    if (!bookingId) return;
+    if (!roomId) return;
 
     // Load initial mock welcome messages or historical messages if available
     setMessages([
@@ -38,37 +39,39 @@ export default function ChatScreen() {
     setLoading(false);
 
     if (socket) {
-      socket.emit('join_room', bookingId);
+      socket.emit('join_room', roomId);
 
-      socket.on('receive_message', (data: any) => {
-        if (data.bookingId === bookingId) {
-          const newMsg: Message = {
-            id: `msg-${Date.now()}-${Math.random()}`,
-            sender: data.sender,
-            message: data.message,
-            timestamp: data.timestamp || Date.now(),
-          };
-          setMessages((prev) => [...prev, newMsg]);
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        }
-      });
+      const handleReceiveMessage = (data: any) => {
+        if (String(data?.bookingId ?? '') !== roomId) return;
+        const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'DRIVER' ? 'DRIVER' : 'CUSTOMER';
+        const newMsg: Message = {
+          id: `msg-${Date.now()}-${Math.random()}`,
+          sender,
+          message: String(data?.message ?? ''),
+          timestamp: data?.timestamp || Date.now(),
+        };
+        setMessages((prev) => [...prev, newMsg]);
+        setTimeout(() => {
+          flatListRef.current?.scrollToEnd({ animated: true });
+        }, 100);
+      };
+
+      socket.on('receive_message', handleReceiveMessage);
     }
 
     return () => {
-      if (socket && bookingId) {
-        socket.emit('leave_room', bookingId);
+      if (socket && roomId) {
+        socket.emit('leave_room', roomId);
         socket.off('receive_message');
       }
     };
-  }, [socket, bookingId]);
+  }, [socket, roomId]);
 
   const handleSendMessage = () => {
-    if (!inputText.trim() || !socket || !bookingId) return;
+    if (!inputText.trim() || !socket || !roomId) return;
 
     const payload = {
-      bookingId,
+      bookingId: roomId,
       sender: 'CUSTOMER',
       message: inputText.trim(),
       timestamp: Date.now(),

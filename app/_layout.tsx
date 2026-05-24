@@ -127,6 +127,7 @@ export default function RootLayout() {
         <Stack.Screen name="(payment)/payment-success" options={{ headerShown: false }} />
         <Stack.Screen name="(payment)/payment-failed" options={{ headerShown: false }} />
         <Stack.Screen name="(notification)/modal" options={{ presentation: 'modal', title: 'Notifications' }} />
+        <Stack.Screen name="(ride)/chat" options={{ headerShown: false }} />
         <Stack.Screen name="(ai)/chat" options={{ headerShown: false }} />
       </Stack>
       <StatusBar style="auto" />
