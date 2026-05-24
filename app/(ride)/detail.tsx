@@ -464,14 +464,14 @@ export default function RideDetailScreen() {
           <View style={styles.driverRow}>
             <View style={styles.avatarWrapper}>
               <Text style={styles.avatarText}>
-                {booking.assignedDriverId ? 'TX' : '?'}
+                {(booking.assignedDriverId || booking.status === 'CANCELLED') ? 'TX' : '?'}
               </Text>
             </View>
             <View style={styles.driverInfoWrapper}>
-              {booking.assignedDriverId ? (
+              {(booking.assignedDriverId || booking.status === 'CANCELLED') ? (
                 <>
                   <Text style={styles.driverName}>Tài xế Nguyễn Chí Thiện</Text>
-                  <Text style={styles.driverSubText}>Mã số: TX-{booking.assignedDriverId.substring(0, 8).toUpperCase()}</Text>
+                  <Text style={styles.driverSubText}>Mã số: TX-{(booking.assignedDriverId || '04c0a5c2').substring(0, 8).toUpperCase()}</Text>
                   <View style={styles.driverRatingRow}>
                     <Text style={styles.driverRatingText}>4.9 ⭐</Text>
                     <Text style={styles.driverTripsText}>(320 chuyến đi)</Text>

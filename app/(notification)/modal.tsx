@@ -17,14 +17,12 @@ const translateNotificationMessage = (message: string) => {
     
     let viReason = reason;
     const lowerReason = reason.toLowerCase();
-    if (lowerReason.includes('customer requested cancellation') || lowerReason.includes('customer requested') || lowerReason.includes('khách hàng yêu cầu')) {
+    if (lowerReason.includes('customer requested cancellation') || lowerReason.includes('customer requested') || lowerReason.includes('khách hàng yêu cầu') || lowerReason.includes('customer_cancelled')) {
       viReason = 'Khách hàng yêu cầu hủy';
-    } else if (lowerReason.includes('timeout_no_driver_found') || lowerReason.includes('no driver') || lowerReason.includes('không tìm thấy tài xế')) {
-      viReason = 'Không tìm thấy tài xế sau 3 phút';
-    } else if (lowerReason.includes('driver canceled') || lowerReason.includes('driver rejected') || lowerReason.includes('tài xế đã hủy')) {
-      viReason = 'Tài xế đã hủy chuyến đi';
     } else if (lowerReason.includes('not specified') || !reason) {
       viReason = 'Không xác định';
+    } else {
+      viReason = 'Tài xế đã hủy chuyến đi';
     }
     return `Chuyến đi của bạn đã bị hủy. Lý do: ${viReason}`;
   }
