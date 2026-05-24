@@ -3,7 +3,7 @@ import {
   StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock } from 'lucide-react-native';
+import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock, MessageSquare } from 'lucide-react-native';
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import { usePayment } from '@/hooks/usePayment';
@@ -12,6 +12,27 @@ import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
+
+const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
+  if (!bookingId) return true;
+  const roomId = payload?.userId || payload?.bookingId || payload?.rideId || '';
+  return roomId === bookingId || roomId === `ROOM_${bookingId}`;
+};
+
+const inferRideUiStatus = (payload: any) => {
+  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
+  const title = String(payload?.title ?? '').toLowerCase();
+  const message = String(payload?.message ?? '').toLowerCase();
+
+  if (['MATCHING', 'CREATED'].includes(rawStatus) || message.includes('tìm tài xế')) return 'FINDING';
+  if (rawStatus === 'ASSIGNED') return 'FOUND';
+  if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP' || title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
+  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
+  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
+  if (rawStatus === 'PAID') return 'PAID';
+  if (rawStatus === 'CANCELLED' || title.includes('hủy') || message.includes('hủy')) return 'CANCELLED';
+  return undefined;
+};
 
 // Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
 const generateRouteCoords = (
@@ -103,26 +124,23 @@ export default function MatchingScreen() {
       try {
         const response = await api.get(`/api/v1/bookings/${bookingId}`);
         if (response.data?.result) {
-          const status = response.data.result.status;
-          setBookingInfo(response.data.result);
+          const booking = response.data.result;
+          setBookingInfo(booking);
 
-          if (status === 'MATCHING') {
-            setBookingStatus('FINDING');
-          } else if (['ASSIGNED', 'ACCEPTED', 'PICKUP'].includes(status)) {
-            setBookingStatus('FOUND');
-          } else if (status === 'IN_PROGRESS') {
-            setBookingStatus('STARTED');
-          } else if (status === 'COMPLETED') {
-            handleRideCompleted({ ...bookingInfo, ...response.data.result });
+          const inferredStatus = inferRideUiStatus(booking);
+          if (inferredStatus === 'COMPLETED') {
+            handleRideCompleted({ ...bookingInfo, ...booking });
             return;
-          } else if (['PAID', 'CANCELLED'].includes(status)) {
+          } else if (inferredStatus === 'CANCELLED' || inferredStatus === 'PAID') {
             router.replace('/(tabs)/explore');
             return;
-          } else if (status === 'PENDING_PAYMENT') {
+          } else if (inferredStatus) {
+            setBookingStatus(inferredStatus);
+          } else if (booking.status === 'PENDING_PAYMENT') {
             // VNPay: booking waits for online payment before matching starts
             setBookingStatus('PENDING_PAYMENT');
-          } else {
-            setBookingStatus(status);
+          } else if (booking.status) {
+            setBookingStatus(booking.status);
           }
         }
       } catch (err: any) {
@@ -148,19 +166,21 @@ export default function MatchingScreen() {
     if (!socket) return;
 
     const handleNotification = (data: any) => {
-      console.log('[Matching] Socket notification:', data);
-      const status = data.status ?? '';
+      if (!isRoomUpdateForBooking(data, bookingId as string)) return;
 
-      if (status === 'MATCHING')       setBookingStatus('FINDING');
-      else if (status === 'ASSIGNED')  setBookingStatus('FOUND');
-      else if (['ACCEPTED', 'PICKUP'].includes(status)) setBookingStatus('ARRIVING');
-      else if (status === 'IN_PROGRESS') setBookingStatus('STARTED');
-      else if (status === 'COMPLETED') {
+      const inferredStatus = inferRideUiStatus(data);
+      if (!inferredStatus) return;
+
+      if (inferredStatus === 'COMPLETED') {
         setBookingStatus('COMPLETED');
         if (bookingInfo) handleRideCompleted({ ...bookingInfo, ...data });
-      } else if (status === 'PAID') {
+      } else if (inferredStatus === 'PAID') {
         setBookingStatus('PAID');
         router.replace('/(tabs)/explore');
+      } else if (inferredStatus === 'CANCELLED') {
+        router.replace('/(tabs)/explore');
+      } else {
+        setBookingStatus(inferredStatus);
       }
     };
 
@@ -322,6 +342,16 @@ export default function MatchingScreen() {
             {getStatusIcon()}
             <Text style={styles.statusText}>{getStatusText()}</Text>
           </View>
+
+          {bookingInfo?.driverId && !['COMPLETED', 'PAID'].includes(bookingStatus) && (
+            <TouchableOpacity
+              style={styles.chatButton}
+              onPress={() => router.push({ pathname: '/(ride)/chat', params: { bookingId: String(bookingId), driverName: bookingInfo?.driverName ?? bookingInfo?.driverId ?? 'Tài xế' } })}
+            >
+              <MessageSquare size={16} color="#2563EB" />
+              <Text style={styles.chatButtonText}>Chat với tài xế</Text>
+            </TouchableOpacity>
+          )}
 
           {/* ── Route summary ──────────────────────────────── */}
           {pickup && dropoff && (
@@ -525,6 +555,22 @@ const styles = StyleSheet.create({
   findingContainer: { alignItems: 'center', paddingVertical: 20 },
   findingSubtext: {
     fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20,
+  },
+  chatButton: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#EFF6FF',
+    marginBottom: 10,
+  },
+  chatButtonText: {
+    color: '#2563EB',
+    fontWeight: '700',
+    fontSize: 13,
   },
   cancelButton: { paddingVertical: 10, paddingHorizontal: 20 },
   cancelText:  { color: '#FF4444', fontWeight: 'bold', fontSize: 15 },
