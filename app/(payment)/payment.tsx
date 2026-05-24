@@ -16,6 +16,7 @@ import { ChevronLeft, CheckCircle, XCircle, QrCode, ExternalLink } from 'lucide-
 import { usePayment } from '@/hooks/usePayment';
 import {
   PaymentService,
+  PaymentInitResponse,
   PaymentStatus,
   canRetryPayment,
   parsePaymentCallbackUrl,
@@ -167,13 +168,13 @@ export default function PaymentScreen() {
     }
   };
 
-  // Auto-open gateway when payment info is loaded with a payUrl/deeplink
+  // Auto-open gateway when payment info is loaded with a payUrl/deeplink/deeplinkWallet
   useEffect(() => {
-    if (paymentData?.payUrl || paymentData?.deeplink) {
+    if (paymentData?.payUrl || paymentData?.deeplink || paymentData?.deeplinkWallet) {
       const timer = setTimeout(handleOpenGateway, 800);
       return () => clearTimeout(timer);
     }
-  }, [paymentData?.payUrl, paymentData?.deeplink]);
+  }, [paymentData?.payUrl, paymentData?.deeplink, paymentData?.deeplinkWallet]);
 
   const handleCopyTransactionId = () => {
     Share.share({ message: `Mã giao dịch: ${transactionId}` });
@@ -213,7 +214,7 @@ export default function PaymentScreen() {
   const isSuccess = status === 'SUCCESS';
   const isFailed = status === 'FAILED' || status === 'FAILED_FINAL';
   const showQr = paymentData?.qrCodeUrl;
-  const showGatewayButton = paymentData?.deeplink || paymentData?.payUrl;
+  const showGatewayButton = paymentData?.deeplink || paymentData?.deeplinkWallet || paymentData?.payUrl;
 
   return (
     <SafeAreaView style={styles.container}>
