@@ -51,7 +51,7 @@ const translateNotificationMessage = (message: string) => {
   if (message.includes('Finding the nearest driver') || message.includes('finding') || message.includes('tìm tài xế')) {
     return 'Đang tìm tài xế gần nhất cho bạn...';
   }
-  if (message.includes('Driver has arrived') || message.includes('arrived') || message.includes('đến điểm đón')) {
+  if (message.includes('Driver has arrived') || message.includes('arrived') || (message.includes('đến điểm đón') && !message.includes('đang đến'))) {
     return 'Tài xế đã đến điểm đón!';
   }
   if (message.includes('Ride completed') || message.includes('finished') || message.includes('hoàn thành')) {
@@ -84,7 +84,6 @@ export default function HomeScreen() {
   const { socket, unreadCount, setUnreadCount } = useSocket();
   const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = useState<any[]>([]);
-  const [bookingStatusOverrides, setBookingStatusOverrides] = useState<Record<string, string>>({});
   const [showTrackingModal, setShowTrackingModal] = useState(false);
 
   // Promo Carousel State & Animation
@@ -135,24 +134,6 @@ export default function HomeScreen() {
 
     if (socket) {
       const handleUpdate = (data: any) => {
-        const inferredStatus = inferRideUiStatus(data);
-        const bookingKey = String(
-          data?.bookingId ??
-          data?.rideId ??
-          (String(data?.userId ?? '').startsWith('ROOM_') ? String(data?.userId).replace(/^ROOM_/, '') : '')
-        ).trim();
-
-        if (bookingKey && inferredStatus) {
-          setBookingStatusOverrides((prev) => ({
-            ...prev,
-            [bookingKey]: inferredStatus,
-          }));
-
-          if (['COMPLETED', 'CANCELLED'].includes(inferredStatus)) {
-            setShowTrackingModal(false);
-          }
-        }
-
         setLatestNotification(translateNotificationMessage(data?.message || data?.title || 'Cập nhật mới cho chuyến đi của bạn!'));
         fetchDashboardData();
       };
@@ -260,11 +241,7 @@ export default function HomeScreen() {
 
   // Detect if the user has an active (in-progress) booking
   const ACTIVE_STATUSES = ['MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
-  const normalizedBookings = recentBookings.map((booking: any) => ({
-    ...booking,
-    status: bookingStatusOverrides[String(booking.id)] || booking.status,
-  }));
-  const latestBooking = normalizedBookings.find((b: any) => ACTIVE_STATUSES.includes(String(b.status).toUpperCase()));
+  const latestBooking = recentBookings.find((b: any) => ACTIVE_STATUSES.includes(b.status));
   const isActive = !!latestBooking;
 
   return (

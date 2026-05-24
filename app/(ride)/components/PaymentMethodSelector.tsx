@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, TouchableOpacity, ScrollView, StyleSheet } from 'react-native';
+import { View, Text, TouchableOpacity, ScrollView, StyleSheet, Image } from 'react-native';
 import { CreditCard } from 'lucide-react-native';
 
 interface PaymentMethodSelectorProps {
@@ -9,9 +9,9 @@ interface PaymentMethodSelectorProps {
 
 const PAYMENT_OPTIONS = [
   { key: 'CASH', label: 'Tiền mặt', color: '#10B981', logo: null },
-  { key: 'MOMO', label: 'MoMo', color: '#A50064', logo: 'M' },
-  { key: 'ZALOPAY', label: 'ZaloPay', color: '#0068FF', logo: 'Z' },
-  { key: 'VNPAY', label: 'VNPay', color: '#AA2B52', logo: 'V' },
+  { key: 'MOMO', label: 'MoMo', color: '#A50064', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547580/logo-momo_s2zo3e.webp' },
+  { key: 'ZALOPAY', label: 'ZaloPay', color: '#0068FF', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547673/zalopay-logo-png_seeklogo-391409_cqprbv.png' },
+  { key: 'VNPAY', label: 'VNPay', color: '#AA2B52', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547836/vnpay-logo-inkythuatso-01-13-16-29-51_qw15he.jpg' },
 ];
 
 export default function PaymentMethodSelector({
@@ -29,9 +29,11 @@ export default function PaymentMethodSelector({
             onPress={() => onSelectPayment(m.key)}
           >
             {m.logo ? (
-              <View style={[styles.paymentLogo, { backgroundColor: m.color }]}>
-                <Text style={styles.logoText}>{m.logo}</Text>
-              </View>
+              <Image
+                source={{ uri: m.logo }}
+                style={styles.paymentLogoImage}
+                resizeMode="contain"
+              />
             ) : (
               <CreditCard size={24} color={paymentMethod === m.key ? '#00B14F' : '#666'} />
             )}
@@ -78,4 +80,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   logoText: { color: '#fff', fontSize: 12, fontWeight: 'bold' },
+  paymentLogoImage: { width: 36, height: 36, borderRadius: 8 },
 });

@@ -10,7 +10,7 @@ import { usePayment } from '@/hooks/usePayment';
 import { Colors } from '@/constants/Colors';
 import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
-import { PaymentService } from '@/services/paymentService';
+import { PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 
 const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
@@ -136,6 +136,11 @@ export default function MatchingScreen() {
             return;
           } else if (inferredStatus) {
             setBookingStatus(inferredStatus);
+          } else if (booking.status === 'PENDING_PAYMENT') {
+            // VNPay: booking waits for online payment before matching starts
+            setBookingStatus('PENDING_PAYMENT');
+          } else if (booking.status) {
+            setBookingStatus(booking.status);
           }
         }
       } catch (err: any) {
@@ -195,7 +200,7 @@ export default function MatchingScreen() {
     const payMethod  = booking.paymentMethod ?? paymentMethod ?? 'CASH';
     const fareAmount = booking.finalFare ?? booking.estimatedFare ?? parsedFare ?? 0;
 
-    if (payMethod === 'CASH') {
+    if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY'].includes(payMethod)) {
       setBookingStatus('PAID');
       stopPolling?.();
       router.replace({
@@ -253,30 +258,33 @@ export default function MatchingScreen() {
   // ── Status helpers ───────────────────────────────────────────
   const getStatusText = () => {
     switch (bookingStatus) {
-      case 'CREATED':  return 'Đang khởi tạo...';
-      case 'FINDING':  return 'Đang tìm tài xế...';
-      case 'FOUND':    return 'Đã tìm thấy tài xế';
-      case 'ARRIVING': return 'Tài xế đang đến';
-      case 'STARTED':  return 'Chuyến đi đã bắt đầu';
-      case 'COMPLETED':return 'Chuyến đi hoàn thành';
-      case 'PAID':     return 'Đã thanh toán';
-      default:         return 'Đang cập nhật...';
+      case 'CREATED':        return 'Đang khởi tạo...';
+      case 'PENDING_PAYMENT':return 'Chờ thanh toán VNPay';
+      case 'FINDING':        return 'Đang tìm tài xế...';
+      case 'FOUND':          return 'Đã tìm thấy tài xế';
+      case 'ARRIVING':       return 'Tài xế đang đến';
+      case 'STARTED':        return 'Chuyến đi đã bắt đầu';
+      case 'COMPLETED':      return 'Chuyến đi hoàn thành';
+      case 'PAID':           return 'Đã thanh toán';
+      default:               return 'Đang cập nhật...';
     }
   };
 
   const getStatusIcon = () => {
     switch (bookingStatus) {
-      case 'CREATED':  return <ActivityIndicator size="small" color={Colors.light.primary} />;
-      case 'FINDING':  return <ActivityIndicator size="small" color="#F59E0B" />;
-      case 'FOUND':    return <Text style={{ fontSize: 16 }}>👨‍✈️</Text>;
-      case 'ARRIVING': return <Text style={{ fontSize: 16 }}>🚗</Text>;
-      case 'STARTED':  return <Text style={{ fontSize: 16 }}>📍</Text>;
-      case 'COMPLETED':return <Text style={{ fontSize: 16 }}>✅</Text>;
-      default:         return <ActivityIndicator size="small" color={Colors.light.primary} />;
+      case 'CREATED':        return <ActivityIndicator size="small" color={Colors.light.primary} />;
+      case 'PENDING_PAYMENT':return <ActivityIndicator size="small" color="#AA2B52" />;
+      case 'FINDING':        return <ActivityIndicator size="small" color="#F59E0B" />;
+      case 'FOUND':          return <Text style={{ fontSize: 16 }}>👨‍✈️</Text>;
+      case 'ARRIVING':       return <Text style={{ fontSize: 16 }}>🚗</Text>;
+      case 'STARTED':        return <Text style={{ fontSize: 16 }}>📍</Text>;
+      case 'COMPLETED':      return <Text style={{ fontSize: 16 }}>✅</Text>;
+      default:               return <ActivityIndicator size="small" color={Colors.light.primary} />;
     }
   };
 
   const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
+  const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
   const isSurge   = parsedSurge > 1.0;
 
   return (
@@ -400,6 +408,72 @@ export default function MatchingScreen() {
             </View>
           )}
 
+          {/* ── VNPay pending payment ────────────────── */}
+          {isPendingPayment && (
+            <View style={styles.vnpayContainer}>
+              <Text style={styles.vnpaySubtext}>
+                Vui lòng thanh toán trước để hệ thống tìm tài xế cho bạn.
+              </Text>
+              <TouchableOpacity
+                style={styles.vnpayButton}
+                onPress={async () => {
+                  try {
+                    const paymentInfo = await PaymentService.getPaymentByBooking(bookingId);
+                    if (paymentInfo) {
+                      const gatewayResult = await PaymentService.openPaymentGateway(paymentInfo);
+                      const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
+                      if (callback?.status === 'success') {
+                        router.replace({
+                          pathname: '/(ride)/matching',
+                          params: { bookingId },
+                        });
+                        return;
+                      }
+                      if (callback?.status === 'failed' || callback?.status === 'cancelled') {
+                        router.replace({
+                          pathname: '/(payment)/payment-failed',
+                          params: {
+                            transactionId: callback.transactionId || paymentInfo.transactionId,
+                            bookingId,
+                            reason: callback.reason || 'Thanh toán không thành công',
+                          },
+                        });
+                        return;
+                      }
+                    }
+                    // Navigate to payment screen to poll status
+                    router.push({
+                      pathname: '/(payment)/payment',
+                      params: {
+                        bookingId,
+                        amount: (bookingInfo?.estimatedFare ?? parsedFare).toString(),
+                        paymentMethod: 'VNPAY',
+                        transactionId: paymentInfo?.transactionId ?? '',
+                      },
+                    });
+                  } catch {
+                    Alert.alert('Lỗi', 'Không thể mở thanh toán VNPay. Vui lòng thử lại.');
+                  }
+                }}
+              >
+                <Text style={styles.vnpayButtonText}>Thanh toán VNPay ngay</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.vnpayCancelButton}
+                onPress={async () => {
+                  try {
+                    await api.post(`/api/v1/bookings/${bookingId}/cancel`);
+                    router.replace('/(tabs)/explore');
+                  } catch {
+                    Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                  }
+                }}
+              >
+                <Text style={styles.vnpayCancelText}>Hủy chuyến</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
           {/* ── Finding / Cancel ─────────────────────────── */}
           {isFinding && (
             <View style={styles.findingContainer}>
@@ -505,4 +579,19 @@ const styles = StyleSheet.create({
     backgroundColor: '#F9FAFB', borderRadius: 12, gap: 8,
   },
   paymentLoadingText: { fontSize: 14, color: Colors.light.primary, fontWeight: '600' },
+  vnpayContainer: { alignItems: 'center', paddingVertical: 16, gap: 12 },
+  vnpaySubtext: {
+    fontSize: 14, color: '#AA2B52', textAlign: 'center', fontWeight: '600',
+  },
+  vnpayButton: {
+    backgroundColor: '#AA2B52',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  vnpayCancelButton: { paddingVertical: 8 },
+  vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
 });

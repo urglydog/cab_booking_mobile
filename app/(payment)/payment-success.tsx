@@ -1,8 +1,8 @@
 import React, { useEffect, useState } from 'react';
-import { StyleSheet, View, Text, TouchableOpacity, ActivityIndicator } from 'react-native';
+import { StyleSheet, View, Text, TouchableOpacity } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { useRouter, useLocalSearchParams } from 'expo-router';
-import { CheckCircle, Home, Star, Receipt } from 'lucide-react-native';
+import { CheckCircle, Navigation, Receipt } from 'lucide-react-native';
 import { usePayment } from '@/hooks/usePayment';
 
 export default function PaymentSuccessScreen() {
@@ -12,12 +12,18 @@ export default function PaymentSuccessScreen() {
   const [showConfetti, setShowConfetti] = useState(false);
 
   useEffect(() => {
-    // Simple animation trigger
     const timer = setTimeout(() => setShowConfetti(true), 300);
     return () => clearTimeout(timer);
   }, []);
 
-  const handleGoHome = () => {
+  const handleContinueMatching = () => {
+    if (bookingId) {
+      router.replace({
+        pathname: '/(ride)/matching',
+        params: { bookingId: bookingId as string },
+      });
+      return;
+    }
     router.replace('/(tabs)');
   };
 
@@ -30,32 +36,20 @@ export default function PaymentSuccessScreen() {
     }
   };
 
-  const handleRateDriver = () => {
-    if (bookingId) {
-      router.push({
-        pathname: '/(review)/review',
-        params: { rideId: bookingId as string },
-      });
-    }
-  };
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        {/* Success Icon */}
         <View style={styles.iconContainer}>
           <View style={[styles.iconCircle, showConfetti && styles.iconCircleAnimate]}>
             <CheckCircle size={80} color="#fff" />
           </View>
         </View>
 
-        {/* Title */}
         <Text style={styles.title}>Thanh toán thành công!</Text>
         <Text style={styles.subtitle}>
-          Cảm ơn bạn đã sử dụng dịch vụ CAB Booking
+          Hệ thống sẽ bắt đầu tìm tài xế cho chuyến đi của bạn
         </Text>
 
-        {/* Amount */}
         {currentPayment && (
           <View style={styles.amountCard}>
             <Text style={styles.amountLabel}>Số tiền đã thanh toán</Text>
@@ -70,7 +64,6 @@ export default function PaymentSuccessScreen() {
           </View>
         )}
 
-        {/* Transaction Info */}
         {transactionId && (
           <View style={styles.txnCard}>
             <Text style={styles.txnLabel}>Mã giao dịch</Text>
@@ -78,25 +71,17 @@ export default function PaymentSuccessScreen() {
           </View>
         )}
 
-        {/* Quick Actions */}
         <View style={styles.actionsContainer}>
           {bookingId && (
-            <>
-              <TouchableOpacity style={styles.actionButton} onPress={handleRateDriver}>
-                <Star size={22} color="#FFD700" fill="#FFD700" />
-                <Text style={styles.actionButtonText}>Đánh giá tài xế</Text>
-              </TouchableOpacity>
-
-              <TouchableOpacity style={styles.actionButton} onPress={handleViewReceipt}>
-                <Receipt size={22} color="#6366F1" />
-                <Text style={styles.actionButtonText}>Xem chi tiết chuyến đi</Text>
-              </TouchableOpacity>
-            </>
+            <TouchableOpacity style={styles.actionButton} onPress={handleViewReceipt}>
+              <Receipt size={22} color="#6366F1" />
+              <Text style={styles.actionButtonText}>Xem chi tiết chuyến đi</Text>
+            </TouchableOpacity>
           )}
 
-          <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleGoHome}>
-            <Home size={22} color="#fff" />
-            <Text style={[styles.actionButtonText, { color: '#fff' }]}>Về trang chủ</Text>
+          <TouchableOpacity style={[styles.actionButton, styles.primaryButton]} onPress={handleContinueMatching}>
+            <Navigation size={22} color="#fff" />
+            <Text style={[styles.actionButtonText, { color: '#fff' }]}>Tiếp tục tìm tài xế</Text>
           </TouchableOpacity>
         </View>
       </View>

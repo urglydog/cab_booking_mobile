@@ -13,6 +13,7 @@ import {
   calculateFallbackFare,
   getRemainingSeconds,
 } from '@/services/pricingService';
+import { PaymentInitResponse, PaymentService } from '@/services/paymentService';
 import VehicleTierSelection from './components/VehicleTierSelection';
 import BookingHeader from './components/BookingHeader';
 import MapPreview from './components/MapPreview';
@@ -31,6 +32,27 @@ const PROMO_CODES = [
 ];
 
 const ESTIMATE_DEBOUNCE_MS = 1200;
+const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY'];
+
+const waitForPaymentByBooking = async (bookingId: string) => {
+  // Attempt with exponential backoff: up to 30 attempts with growing intervals
+  // 1+1.2+1.44+1.73+2.07+2.49+2.99+3.59+4.3+5.0+5.0... = ~60s total
+  let waitMs = 1000;
+  let totalWaitedMs = 0;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
+    const paymentInfo = await PaymentService.getPaymentByBooking(bookingId);
+    if (paymentInfo?.transactionId) {
+      console.log(`[Booking] waitForPaymentByBooking: found transaction ${paymentInfo.transactionId} after ${attempt} attempts (${totalWaitedMs}ms)`);
+      return paymentInfo;
+    }
+    console.log(`[Booking] waitForPaymentByBooking attempt ${attempt + 1}/30: no transaction yet, waiting ${waitMs}ms (total: ${totalWaitedMs}ms)`);
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    totalWaitedMs += waitMs;
+    waitMs = Math.min(waitMs * 1.2, 5000);
+  }
+  console.warn(`[Booking] waitForPaymentByBooking: timed out after 30 attempts (${totalWaitedMs}ms) for bookingId=${bookingId}`);
+  return null;
+};
 
 const LOCAL_FAMOUS_PLACES = [
   {
@@ -135,6 +157,7 @@ function useDebouncedCallback<T extends (...args: any[]) => any>(
 
 export default function BookingScreen() {
   const router = useRouter();
+  const bookingInFlightRef = useRef(false);
 
   // ── Form state ──────────────────────────────────────────────
   const [pickup, setPickup] = useState('');
@@ -410,6 +433,8 @@ export default function BookingScreen() {
 
   // ── Submit booking ────────────────────────────────────────────
   const handleBooking = async () => {
+    if (bookingInFlightRef.current) return;
+
     if (!pickup || !dropoff) {
       Alert.alert('Lỗi', 'Vui lòng nhập điểm đón và điểm đến');
       return;
@@ -432,13 +457,12 @@ export default function BookingScreen() {
       return;
     }
 
+    bookingInFlightRef.current = true;
     setLoading(true);
     try {
-      const customerId = (await AsyncStorage.getItem('user_id')) ?? '';
       const idempotencyKey = `${Date.now()}_${Math.random().toString(36).substring(2, 10)}`;
 
       const est = selectedEstimate;
-      // vehicleTier is already BIKE / CAR4 / CAR7
       const vehicleTierForApi: VehicleTier = vehicleTier;
 
       const bookingRequest = {
@@ -459,9 +483,12 @@ export default function BookingScreen() {
         paymentMethod,
         estimatedFare: finalFare,
         promoCode: selectedPromo ? selectedPromo.code : '',
-        // Both fields are required by BookingService.confirmQuoteBeforeBooking()
+        // All quote fields required by backend BookingService.confirmQuoteBeforeBooking()
         estimateId: est?.estimateId ?? '',
+        quoteId: est?.quoteId ?? '',
         quotePayloadHash: est?.quotePayloadHash ?? '',
+        quoteHashAlgorithm: est?.quoteHashAlgorithm ?? 'SHA-256',
+        quoteExpiresAt: est?.expiresAt ?? '',
         surgeMultiplier: surgeMultiplier,
         idempotencyKey,
       };
@@ -477,8 +504,60 @@ export default function BookingScreen() {
 
       if (isSuccess) {
         const bookingId = response.data?.result?.id ?? response.data?.id;
+
+        // Online prepaid flow: pay first, then Booking moves to MATCHING.
+        // Flow: booking(PENDING_PAYMENT) -> payment.requested(Kafka) -> PaymentService creates txn ->
+        // Customer pays on payment.tsx -> payment.completed(Kafka) -> Booking MATCHING -> ride.created
+        if (ONLINE_PAYMENT_METHODS.includes(paymentMethod)) {
+          let paymentInfo: PaymentInitResponse | null = null;
+
+          // Step 1: Wait for backend to create the transaction via Kafka (2-5s typical)
+          paymentInfo = await waitForPaymentByBooking(bookingId);
+
+          // Step 2: If backend hasn't created it yet, create directly here.
+          // If initPayment fails (e.g. booking already has a transaction from Kafka),
+          // we still navigate to payment.tsx which will fetch the existing transaction.
+          if (!paymentInfo) {
+            console.warn('[Booking] Payment transaction not found by polling, creating directly');
+            try {
+              paymentInfo = await PaymentService.initPayment({
+                bookingId,
+                amount: finalFare,
+                paymentMethod: paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH',
+              });
+            } catch (initError: any) {
+              // initPayment may fail if backend already created the transaction via Kafka.
+              // Navigate to payment.tsx anyway — it will fetch the existing transaction.
+              console.warn('[Booking] initPayment failed, navigating to payment screen to fetch existing txn:', initError);
+              router.replace({
+                pathname: '/(payment)/payment',
+                params: {
+                  bookingId,
+                  amount: finalFare.toString(),
+                  paymentMethod,
+                  transactionId: '',
+                },
+              });
+              return;
+            }
+          }
+
+          // Step 3: Navigate to payment screen — let payment.tsx handle gateway/polling
+          router.replace({
+            pathname: '/(payment)/payment',
+            params: {
+              bookingId,
+              amount: finalFare.toString(),
+              paymentMethod,
+              transactionId: paymentInfo.transactionId,
+            },
+          });
+          return;
+        }
+
+        // CASH: matching starts immediately.
         router.replace({
-          pathname: '/matching',
+          pathname: '/(ride)/matching',
           params: {
             bookingId,
             estimatedFare: finalFare.toString(),
@@ -502,16 +581,20 @@ export default function BookingScreen() {
       if (error?.response?.status === 409) {
         const existingId = error?.response?.data?.result?.id;
         if (existingId) {
-          router.replace({ pathname: '/matching', params: { bookingId: existingId } });
+          router.replace({ pathname: '/(ride)/matching', params: { bookingId: existingId } });
           return;
         }
         Alert.alert('Trùng lặp', 'Yêu cầu đặt xe này đã được xử lý. Vui lòng thử tuyến khác.');
+      } else if (error?.response?.status === 422 && error?.response?.data?.errorMessage === 'INVALID_QUOTE_STATUS') {
+        clearStaleEstimate();
+        Alert.alert('Giá không còn hợp lệ', 'Báo giá này đã hết hiệu lực hoặc đã được sử dụng cho giao dịch trước. Vui lòng chọn lại lộ trình để lấy báo giá mới.');
       } else {
         const msg = error?.response?.data?.message ?? error?.response?.data?.errorMessage
           ?? 'Không thể đặt xe. Vui lòng thử lại.';
         Alert.alert('Đặt xe thất bại', msg);
       }
     } finally {
+      bookingInFlightRef.current = false;
       setLoading(false);
     }
   };
