@@ -16,7 +16,7 @@ export interface CreateBookingPayload {
   dropoffLat: number;
   dropoffLng: number;
   vehicleType: VehicleTier;
-  paymentMethod: 'CASH' | 'MOMO' | 'ZALOPAY' | 'VNPAY';
+  paymentMethod: 'CASH' | 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY';
   estimatedFare?: number;
   customerNote?: string;
   /** From Pricing-Service estimate response */

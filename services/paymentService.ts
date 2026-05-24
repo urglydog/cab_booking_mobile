@@ -6,7 +6,7 @@ import api from './api';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH';
+export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY' | 'CASH';
 
 export type PaymentStatus = 'INIT' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'RETRY' | 'FAILED_FINAL';
 
@@ -367,6 +367,7 @@ export const PaymentService = {
       { key: 'MOMO', label: 'MoMo', color: '#A50064' },
       { key: 'ZALOPAY', label: 'ZaloPay', color: '#0068FF' },
       { key: 'VNPAY', label: 'VNPay', color: '#AA2B52' },
+      { key: 'SEPAY', label: 'SePay (VietQR)', color: '#FF5E00' },
     ];
   },
 };
