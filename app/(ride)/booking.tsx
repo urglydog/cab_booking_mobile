@@ -672,12 +672,7 @@ export default function BookingScreen() {
           onSelectPayment={setPaymentMethod}
         />
 
-        {/* Promo Code */}
-        <PromoCodeSelector
-          promoCodes={PROMO_CODES}
-          selectedPromo={selectedPromo}
-          onSelectPromo={setSelectedPromo}
-        />
+        {/* Promo Code selection removed to comply with lack of admin promotion management */}
 
         {/* Final Fare Summary */}
         <FareSummary

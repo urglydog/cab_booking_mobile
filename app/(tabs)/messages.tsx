@@ -1,34 +1,66 @@
-import React from 'react';
-import { StyleSheet, View, Text, FlatList, TouchableOpacity } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { StyleSheet, View, Text, FlatList, TouchableOpacity, ActivityIndicator } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { Search, UserCircle2 } from 'lucide-react-native';
+import { Search, UserCircle2, MessageSquare, ChevronRight } from 'lucide-react-native';
 import { Colors } from '@/constants/Colors';
-
-const MOCK_MESSAGES = [
-  {
-    id: '1',
-    name: 'Tài xế Nguyễn Chí Thiện',
-    message: 'Tôi đang đến điểm đón, bạn vui lòng đợi chút nhé!',
-    time: '10:45',
-    unread: true,
-  },
-  {
-    id: '2',
-    name: 'Tài xế Trần Quốc Bảo',
-    message: 'Tôi đang đứng ở cổng trường IUH, bạn mặc áo gì thế?',
-    time: 'Hôm qua',
-    unread: false,
-  },
-  {
-    id: '3',
-    name: 'Hỗ trợ CAB Support',
-    message: 'Yêu cầu hỗ trợ của bạn đã được giải quyết.',
-    time: '15/05',
-    unread: false,
-  },
-];
+import api from '@/services/api';
+import AsyncStorage from '@react-native-async-storage/async-storage';
+import { useRouter, useFocusEffect } from 'expo-router';
 
 export default function MessagesScreen() {
+  const router = useRouter();
+  const [bookings, setBookings] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
+
+  const fetchBookings = async () => {
+    try {
+      const userId = await AsyncStorage.getItem('user_id');
+      if (!userId) {
+        setLoading(false);
+        return;
+      }
+      const response = await api.get(`/api/v1/bookings/customer/${userId}?page=0&size=20`);
+      if (response.data && response.data.result) {
+        const fetchedBookings = response.data.result.content || [];
+        // Filter out bookings that are CANCELLED or still MATCHING (no driver accepted yet)
+        const eligibleBookings = fetchedBookings.filter((b: any) => 
+          b.status !== 'CANCELLED' && b.status !== 'MATCHING'
+        );
+        setBookings(eligibleBookings);
+      }
+    } catch (error) {
+      console.log('Failed to fetch bookings in messages tab:', error);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useFocusEffect(
+    React.useCallback(() => {
+      fetchBookings();
+    }, [])
+  );
+
+  const getChatSubtitle = (item: any) => {
+    switch (item.status) {
+      case 'COMPLETED':
+        return 'Lịch sử trò chuyện (Chuyến đi đã hoàn thành)';
+      case 'CANCELLED':
+        return 'Cuộc trò chuyện đã đóng (Chuyến xe đã hủy)';
+      case 'MATCHING':
+        return 'Đang tìm tài xế gần nhất...';
+      default:
+        return 'Nhấp để trò chuyện trực tiếp với tài xế...';
+    }
+  };
+
+  const getDriverName = (item: any) => {
+    if (item.assignedDriverId) {
+      return 'Tài xế Nguyễn Chí Thiện';
+    }
+    return `Chuyến xe #${item.id.substring(0, 8).toUpperCase()}`;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -40,27 +72,63 @@ export default function MessagesScreen() {
         <Text style={styles.searchPlaceholder}>Tìm kiếm cuộc trò chuyện...</Text>
       </View>
 
-      <FlatList
-        data={MOCK_MESSAGES}
-        keyExtractor={(item) => item.id}
-        renderItem={({ item }) => (
-          <TouchableOpacity style={styles.messageItem} activeOpacity={0.7}>
-            <View style={styles.avatarContainer}>
-              <UserCircle2 size={40} color={item.unread ? Colors.light.primary : '#999'} />
-            </View>
-            <View style={styles.messageContent}>
-              <View style={styles.messageHeader}>
-                <Text style={[styles.name, item.unread && styles.unreadName]}>{item.name}</Text>
-                <Text style={styles.time}>{item.time}</Text>
-              </View>
-              <Text numberOfLines={1} style={[styles.message, item.unread && styles.unreadMessage]}>
-                {item.message}
-              </Text>
-            </View>
-            {item.unread && <View style={styles.unreadDot} />}
-          </TouchableOpacity>
-        )}
-      />
+      {loading ? (
+        <View style={styles.center}>
+          <ActivityIndicator size="large" color={Colors.light.primary} />
+        </View>
+      ) : bookings.length === 0 ? (
+        <View style={styles.center}>
+          <MessageSquare size={64} color="#CCC" />
+          <Text style={styles.emptyText}>Chưa có cuộc trò chuyện nào</Text>
+        </View>
+      ) : (
+        <FlatList
+          data={bookings}
+          keyExtractor={(item) => item.id}
+          renderItem={({ item }) => {
+            const isCompleted = item.status === 'COMPLETED' || item.status === 'CANCELLED';
+            return (
+              <TouchableOpacity 
+                style={styles.messageItem} 
+                activeOpacity={0.7}
+                onPress={() => router.push({
+                  pathname: '/(ride)/chat',
+                  params: { bookingId: item.id, driverName: getDriverName(item) }
+                })}
+              >
+                <View style={styles.avatarContainer}>
+                  <UserCircle2 size={40} color={!isCompleted ? Colors.light.primary : '#999'} />
+                </View>
+                <View style={styles.messageContent}>
+                  <View style={styles.messageHeader}>
+                    <Text style={[styles.name, !isCompleted && styles.unreadName]}>
+                      {getDriverName(item)}
+                    </Text>
+                    <Text style={styles.time}>
+                      {new Date(item.createdAt).toLocaleDateString('vi-VN')}
+                    </Text>
+                  </View>
+
+                  {/* Route Information Card */}
+                  <View style={styles.routeContainer}>
+                    <Text numberOfLines={1} style={styles.routeText}>
+                      📍 <Text style={{ fontWeight: '600' }}>Từ: </Text>{item.pickupLocation}
+                    </Text>
+                    <Text numberOfLines={1} style={styles.routeText}>
+                      🏁 <Text style={{ fontWeight: '600' }}>Đến: </Text>{item.dropoffLocation}
+                    </Text>
+                  </View>
+
+                  <Text numberOfLines={1} style={[styles.message, !isCompleted && styles.unreadMessage]}>
+                    {getChatSubtitle(item)}
+                  </Text>
+                </View>
+                <ChevronRight size={18} color="#C7C7CC" />
+              </TouchableOpacity>
+            );
+          }}
+        />
+      )}
     </SafeAreaView>
   );
 }
@@ -77,6 +145,17 @@ const styles = StyleSheet.create({
   title: {
     fontSize: 24,
     fontWeight: 'bold',
+  },
+  center: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    paddingVertical: 40,
+  },
+  emptyText: {
+    marginTop: 10,
+    fontSize: 16,
+    color: '#999',
   },
   searchContainer: {
     flexDirection: 'row',
@@ -107,6 +186,7 @@ const styles = StyleSheet.create({
   messageContent: {
     flex: 1,
     marginLeft: 15,
+    marginRight: 10,
   },
   messageHeader: {
     flexDirection: 'row',
@@ -133,11 +213,18 @@ const styles = StyleSheet.create({
     color: '#333',
     fontWeight: '600',
   },
-  unreadDot: {
-    width: 8,
-    height: 8,
-    borderRadius: 4,
-    backgroundColor: Colors.light.primary,
-    marginLeft: 10,
+  routeContainer: {
+    backgroundColor: '#F8FAFC',
+    borderRadius: 8,
+    padding: 8,
+    marginVertical: 6,
+    gap: 4,
+    borderWidth: 1,
+    borderColor: '#F1F5F9',
+  },
+  routeText: {
+    fontSize: 12,
+    color: '#475569',
+    lineHeight: 16,
   }
 });

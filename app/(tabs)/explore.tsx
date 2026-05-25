@@ -29,19 +29,7 @@ export default function ActivityScreen() {
 
       if (response.data && response.data.result) {
         const fetchedBookings = response.data.result.content || [];
-        
-        const mockCompleted = {
-          id: 'booking-mock-123',
-          assignedDriverId: 'driver-mock-456',
-          pickupLocation: 'Trường ĐH Công nghiệp TP.HCM, Gò Vấp',
-          dropoffLocation: 'Sân bay Tân Sơn Nhất',
-          vehicleType: 'CAR4',
-          paymentMethod: 'CASH',
-          estimatedFare: 85000,
-          status: 'COMPLETED',
-          createdAt: new Date().toISOString(),
-        };
-        setBookings([mockCompleted, ...fetchedBookings]);
+        setBookings(fetchedBookings);
       }
     } catch (error) {
       console.error('Failed to fetch bookings:', error);
@@ -105,7 +93,7 @@ export default function ActivityScreen() {
                 <Text style={styles.tagBadgeText}>Thẻ / Ví</Text>
               </View>
             )}
-            {(item.discountAmount > 0 || item.promoCode || item.id === 'booking-mock-123') && (
+            {(item.discountAmount > 0 || item.promoCode) && (
               <View style={[styles.tagBadge, { backgroundColor: '#F59E0B' }]}>
                 <Text style={styles.tagBadgeText}>Khuyến mãi</Text>
               </View>
@@ -121,21 +109,9 @@ export default function ActivityScreen() {
         </View>
       </TouchableOpacity>
 
-      {/* Nút Đánh giá (Độc lập Sibling) */}
+      {/* Chevron Navigation Icon */}
       <View style={styles.priceContainer}>
-        {item.status === 'COMPLETED' ? (
-          <TouchableOpacity 
-            style={styles.rateButton}
-            onPress={() => router.push({
-              pathname: '/(review)/review',
-              params: { rideId: item.id, driverId: item.assignedDriverId || 'driver-mock-456' }
-            })}
-          >
-            <Text style={styles.rateButtonText}>Đánh giá</Text>
-          </TouchableOpacity>
-        ) : (
-          <ChevronRight size={20} color="#CCC" />
-        )}
+        <ChevronRight size={20} color="#CCC" />
       </View>
     </View>
   );

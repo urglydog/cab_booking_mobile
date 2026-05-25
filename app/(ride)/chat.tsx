@@ -21,43 +21,120 @@ export default function ChatScreen() {
   const [messages, setMessages] = useState<Message[]>([]);
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
+  const [isCompleted, setIsCompleted] = useState(false);
   const flatListRef = useRef<FlatList>(null);
   const roomId = String(bookingId ?? '');
 
   useEffect(() => {
     if (!roomId) return;
 
-    // Load initial mock welcome messages or historical messages if available
-    setMessages([
-      {
-        id: 'welcome-1',
-        sender: 'DRIVER',
-        message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
-        timestamp: Date.now() - 60000,
+    const fetchBookingStatusAndInit = async () => {
+      if (roomId.startsWith('booking-mock')) {
+        setIsCompleted(true);
+        setMessages([
+          {
+            id: 'hist-1',
+            sender: 'DRIVER',
+            message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
+            timestamp: Date.now() - 300000,
+          },
+          {
+            id: 'hist-2',
+            sender: 'CUSTOMER',
+            message: 'Vâng, tôi đang đi xuống sảnh đây ạ.',
+            timestamp: Date.now() - 240000,
+          },
+          {
+            id: 'hist-3',
+            sender: 'DRIVER',
+            message: 'Tôi đang đứng ngay cổng chính, xe màu đỏ nhé.',
+            timestamp: Date.now() - 180000,
+          },
+          {
+            id: 'hist-4',
+            sender: 'CUSTOMER',
+            message: 'Dạ vâng tôi thấy xe rồi ạ.',
+            timestamp: Date.now() - 120000,
+          }
+        ]);
+        setLoading(false);
+        return;
       }
-    ]);
-    setLoading(false);
 
-    if (socket) {
-      socket.emit('join_room', roomId);
+      try {
+        const response = await api.get(`/api/v1/bookings/${roomId}`);
+        if (response.data && response.data.result) {
+          const bookingData = response.data.result;
+          if (bookingData.status === 'COMPLETED' || bookingData.status === 'CANCELLED') {
+            setIsCompleted(true);
+            setMessages([
+              {
+                id: 'hist-1',
+                sender: 'DRIVER',
+                message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
+                timestamp: Date.now() - 300000,
+              },
+              {
+                id: 'hist-2',
+                sender: 'CUSTOMER',
+                message: 'Vâng, tôi đang đi xuống sảnh đây ạ.',
+                timestamp: Date.now() - 240000,
+              },
+              {
+                id: 'hist-3',
+                sender: 'DRIVER',
+                message: 'Tôi đang đứng ngay cổng chính, xe màu đỏ nhé.',
+                timestamp: Date.now() - 180000,
+              },
+              {
+                id: 'hist-4',
+                sender: 'CUSTOMER',
+                message: 'Dạ vâng tôi thấy xe rồi ạ.',
+                timestamp: Date.now() - 120000,
+              }
+            ]);
+            setLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.log('Failed to fetch booking status in chat:', err);
+      }
 
-      const handleReceiveMessage = (data: any) => {
-        if (String(data?.bookingId ?? '') !== roomId) return;
-        const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'DRIVER' ? 'DRIVER' : 'CUSTOMER';
-        const newMsg: Message = {
-          id: `msg-${Date.now()}-${Math.random()}`,
-          sender,
-          message: String(data?.message ?? ''),
-          timestamp: data?.timestamp || Date.now(),
+      // Live mode fallback:
+      setMessages([
+        {
+          id: 'welcome-1',
+          sender: 'DRIVER',
+          message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
+          timestamp: Date.now() - 60000,
+        }
+      ]);
+      setLoading(false);
+
+      if (socket) {
+        socket.emit('join_room', roomId);
+
+        const handleReceiveMessage = (data: any) => {
+          if (String(data?.bookingId ?? '') !== roomId) return;
+          const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'DRIVER' ? 'DRIVER' : 'CUSTOMER';
+          const newMsg: Message = {
+            id: `msg-${Date.now()}-${Math.random()}`,
+            sender,
+            message: String(data?.message ?? ''),
+            timestamp: data?.timestamp || Date.now(),
+          };
+          setMessages((prev) => [...prev, newMsg]);
+          setTimeout(() => {
+            flatListRef.current?.scrollToEnd({ animated: true });
+          }, 100);
         };
-        setMessages((prev) => [...prev, newMsg]);
-        setTimeout(() => {
-          flatListRef.current?.scrollToEnd({ animated: true });
-        }, 100);
-      };
 
-      socket.on('receive_message', handleReceiveMessage);
-    }
+        socket.on('receive_message', handleReceiveMessage);
+      }
+    };
+
+    fetchBookingStatusAndInit();
 
     return () => {
       if (socket && roomId) {
@@ -130,9 +207,13 @@ export default function ChatScreen() {
       </View>
 
       {/* Alert Banner */}
-      <View style={styles.safetyBanner}>
-        <Shield size={14} color="#059669" />
-        <Text style={styles.safetyText}>Trò chuyện được mã hóa để bảo vệ quyền riêng tư của bạn</Text>
+      <View style={[styles.safetyBanner, isCompleted && { backgroundColor: '#FEF2F2' }]}>
+        <Shield size={14} color={isCompleted ? '#EF4444' : '#059669'} />
+        <Text style={[styles.safetyText, isCompleted && { color: '#EF4444' }]}>
+          {isCompleted 
+            ? 'Chuyến đi đã hoàn thành. Nhắn tin đã bị vô hiệu hóa để bảo vệ quyền riêng tư.'
+            : 'Trò chuyện được mã hóa để bảo vệ quyền riêng tư của bạn'}
+        </Text>
       </View>
 
       {/* Message List */}
@@ -150,19 +231,24 @@ export default function ChatScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        <View style={styles.inputContainer}>
+        <View style={[styles.inputContainer, isCompleted && { backgroundColor: '#F3F4F6' }]}>
           <TextInput
-            style={styles.textInput}
-            placeholder="Nhập tin nhắn..."
+            style={[styles.textInput, isCompleted && { backgroundColor: '#E5E7EB', color: '#9CA3AF' }]}
+            placeholder={isCompleted ? "Cuộc trò chuyện đã kết thúc" : "Nhập tin nhắn..."}
             placeholderTextColor="#9CA3AF"
             value={inputText}
             onChangeText={setInputText}
             onSubmitEditing={handleSendMessage}
+            editable={!isCompleted}
           />
           <TouchableOpacity
-            style={[styles.sendButton, !inputText.trim() && styles.sendButtonDisabled]}
+            style={[
+              styles.sendButton, 
+              (!inputText.trim() || isCompleted) && styles.sendButtonDisabled,
+              isCompleted && { backgroundColor: '#D1D5DB' }
+            ]}
             onPress={handleSendMessage}
-            disabled={!inputText.trim()}
+            disabled={!inputText.trim() || isCompleted}
           >
             <Send size={18} color="#FFF" />
           </TouchableOpacity>
