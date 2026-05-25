@@ -379,11 +379,13 @@ export default function HomeScreen() {
           styles.floatingContainer,
           { transform: [{ translateY: bubbleYAnim }] }
         ]}>
-          {/* Speech Tooltip / Suggestion Bubble */}
-          <View style={styles.speechBubble}>
-            <Text style={styles.speechText}>{AI_SUGGESTIONS[suggestionIdx]}</Text>
-            <View style={styles.speechArrow} />
-          </View>
+          {/* Speech Tooltip / Suggestion Bubble (hidden when tracking an active ride to prevent overlapping) */}
+          {!isActive && (
+            <View style={styles.speechBubble}>
+              <Text style={styles.speechText}>{AI_SUGGESTIONS[suggestionIdx]}</Text>
+              <View style={styles.speechArrow} />
+            </View>
+          )}
   
           {/* Pulse Ripple Background */}
           <Animated.View style={[

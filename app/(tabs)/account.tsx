@@ -176,7 +176,6 @@ export default function AccountScreen() {
           <View style={styles.menuSection}>
             <Text style={styles.menuTitle}>Tài chính</Text>
             <MenuItem icon={<CreditCard size={20} color="#3B82F6" />} label="Phương thức thanh toán" />
-            <MenuItem icon={<Gift size={20} color="#F59E0B" />} label="Ưu đãi & Khuyến mãi" />
           </View>
         )}
 

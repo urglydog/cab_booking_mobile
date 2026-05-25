@@ -909,18 +909,7 @@ export default function AIChatScreen() {
                     </ScrollView>
                   </View>
 
-                  {/* Promo Selector Row (Dropdown style trigger with alternating overlay modal fix) */}
-                  <View style={styles.optionBox}>
-                    <Text style={styles.optionLabel}>Khuyến mãi</Text>
-                    <TouchableOpacity 
-                      style={styles.promoSelectorBtn} 
-                      onPress={handleOpenPromoList}
-                    >
-                      <Text style={styles.promoSelectorBtnText}>
-                        {appliedPromoCode ? `${appliedPromoCode} (-${appliedDiscount.toLocaleString('vi-VN')}đ)` : 'Chọn khuyến mãi >'}
-                      </Text>
-                    </TouchableOpacity>
-                  </View>
+                  {/* Promotion selection removed to keep alignment with disabled promo systems */}
                 </View>
 
                 {/* Fare Summary */}
