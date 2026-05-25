@@ -24,13 +24,13 @@ const inferRideUiStatus = (payload: any) => {
   const title = String(payload?.title ?? '').toLowerCase();
   const message = String(payload?.message ?? '').toLowerCase();
 
-  if (['MATCHING', 'CREATED'].includes(rawStatus) || message.includes('tìm tài xế')) return 'FINDING';
+  if (['MATCHING', 'CREATED', 'REJECTED', 'RIDE.REJECTED', 'RIDE_REJECTED'].includes(rawStatus) || message.includes('tìm tài xế') || message.includes('từ chối') || message.includes('reject')) return 'FINDING';
   if (rawStatus === 'ASSIGNED') return 'FOUND';
   if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP' || title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
   if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
   if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
   if (rawStatus === 'PAID') return 'PAID';
-  if (rawStatus === 'CANCELLED' || title.includes('hủy') || message.includes('hủy')) return 'CANCELLED';
+  if (rawStatus === 'CANCELLED' || ['TIMEOUT', 'BOOKING.TIMEOUT'].includes(rawStatus) || title.includes('hủy') || message.includes('hủy') || message.includes('không tìm thấy tài xế') || title.includes('hết thời gian')) return 'CANCELLED';
   return undefined;
 };
 
@@ -154,39 +154,40 @@ export default function MatchingScreen() {
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
 
+  const fetchBookingInfo = async () => {
+    if (!bookingId) return;
+    try {
+      const response = await api.get(`/api/v1/bookings/${bookingId}`);
+      if (response.data?.result) {
+        const booking = response.data.result;
+        setBookingInfo(booking);
+
+        const inferredStatus = inferRideUiStatus(booking);
+        if (inferredStatus === 'COMPLETED') {
+          handleRideCompleted(booking);
+          return;
+        } else if (inferredStatus === 'CANCELLED' || inferredStatus === 'PAID') {
+          router.replace('/(tabs)/explore');
+          return;
+        } else if (inferredStatus) {
+          setBookingStatus(inferredStatus);
+        } else if (booking.status === 'PENDING_PAYMENT') {
+          // VNPay: booking waits for online payment before matching starts
+          setBookingStatus('PENDING_PAYMENT');
+        } else if (booking.status) {
+          setBookingStatus(booking.status);
+        }
+      }
+    } catch (err: any) {
+      if (err?.response?.status !== 404) {
+        console.log('Could not fetch booking info:', err?.message);
+      }
+    }
+  };
+
   // ── Poll booking status ──────────────────────────────────────
   useEffect(() => {
     if (!bookingId) return;
-
-    const fetchBookingInfo = async () => {
-      try {
-        const response = await api.get(`/api/v1/bookings/${bookingId}`);
-        if (response.data?.result) {
-          const booking = response.data.result;
-          setBookingInfo(booking);
-
-          const inferredStatus = inferRideUiStatus(booking);
-          if (inferredStatus === 'COMPLETED') {
-            handleRideCompleted({ ...bookingInfo, ...booking });
-            return;
-          } else if (inferredStatus === 'CANCELLED' || inferredStatus === 'PAID') {
-            router.replace('/(tabs)/explore');
-            return;
-          } else if (inferredStatus) {
-            setBookingStatus(inferredStatus);
-          } else if (booking.status === 'PENDING_PAYMENT') {
-            // VNPay: booking waits for online payment before matching starts
-            setBookingStatus('PENDING_PAYMENT');
-          } else if (booking.status) {
-            setBookingStatus(booking.status);
-          }
-        }
-      } catch (err: any) {
-        if (err?.response?.status !== 404) {
-          console.log('Could not fetch booking info:', err?.message);
-        }
-      }
-    };
 
     fetchBookingInfo();
     const interval = setInterval(fetchBookingInfo, 5000);
@@ -211,14 +212,19 @@ export default function MatchingScreen() {
 
       if (inferredStatus === 'COMPLETED') {
         setBookingStatus('COMPLETED');
-        if (bookingInfo) handleRideCompleted({ ...bookingInfo, ...data });
+        fetchBookingInfo();
       } else if (inferredStatus === 'PAID') {
         setBookingStatus('PAID');
         router.replace('/(tabs)/explore');
       } else if (inferredStatus === 'CANCELLED') {
+        if (data.message) {
+          Alert.alert('Thông báo', data.message);
+        }
         router.replace('/(tabs)/explore');
       } else {
         setBookingStatus(inferredStatus);
+        // Force refresh booking details immediately to synchronize driver assignment state
+        fetchBookingInfo();
       }
     };
 
@@ -228,7 +234,7 @@ export default function MatchingScreen() {
       socket.off('new_notification', handleNotification);
       socket.off('booking_status_update', handleNotification);
     };
-  }, [socket, bookingId, bookingInfo]);
+  }, [socket, bookingId]);
 
   // ── Payment flow ─────────────────────────────────────────────
   const handleRideCompleted = async (info?: any) => {
