@@ -32,7 +32,7 @@ const PROMO_CODES = [
 ];
 
 const ESTIMATE_DEBOUNCE_MS = 1200;
-const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY'];
+const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'];
 
 const waitForPaymentByBooking = async (bookingId: string) => {
   // Attempt with exponential backoff: up to 30 attempts with growing intervals
@@ -535,7 +535,7 @@ export default function BookingScreen() {
               paymentInfo = await PaymentService.initPayment({
                 bookingId,
                 amount: finalFare,
-                paymentMethod: paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH',
+                paymentMethod: paymentMethod as 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY' | 'CASH',
               });
             } catch (initError: any) {
               // initPayment may fail if backend already created the transaction via Kafka.
@@ -672,12 +672,7 @@ export default function BookingScreen() {
           onSelectPayment={setPaymentMethod}
         />
 
-        {/* Promo Code */}
-        <PromoCodeSelector
-          promoCodes={PROMO_CODES}
-          selectedPromo={selectedPromo}
-          onSelectPromo={setSelectedPromo}
-        />
+        {/* Promo Code selection removed to comply with lack of admin promotion management */}
 
         {/* Final Fare Summary */}
         <FareSummary

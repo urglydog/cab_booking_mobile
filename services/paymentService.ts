@@ -1,11 +1,12 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import api from './api';
 
 WebBrowser.maybeCompleteAuthSession();
 
-export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'CASH';
+export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY' | 'CASH';
 
 export type PaymentStatus = 'INIT' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'RETRY' | 'FAILED_FINAL';
 
@@ -165,45 +166,106 @@ export const PaymentService = {
   /**
    * Mở cổng thanh toán (deeplink / web / QR)
    *
-   * VNPay: Dùng WebBrowser.openBrowserAsync vì:
-   * - VNPay redirect về returnUrl (web URL https://...)
-   * - Không dùng custom URL scheme như cabbookingmobile://
-   * - openBrowserAsync mở browser bình thường, user hoàn tất thanh toán và quay lại app
+   * VNPay: Dùng openAuthSessionAsync vì:
+   * - Chờ redirect xảy ra trước khi resolve
+   * - Khi resolve (user hoàn tất thanh toán + redirect), gọi dismissBrowser()
+   * - Trên standalone app: dismissBrowser() đóng Chrome Custom Tab
+   * - Trên Expo Go: vẫn nhận callbackUrl để xử lý kết quả
    *
-   * MoMo/ZaloPay: Dùng Linking.openURL (deeplink app-to-app)
+   * MoMo/ZaloPay: Ưu tiên dùng deeplink (deeplink/deeplinkWallet) để mở app ví trực tiếp.
+   * Nếu không mở được → dùng payUrl với openBrowserAsync trên iOS.
    */
   async openPaymentGateway(payment: PaymentInitResponse): Promise<{ type: 'DEEPLINK' | 'WEB' | 'QR'; url?: string; callbackUrl?: string }> {
-    // Ưu tiên 1: Deep link (MoMo / ZaloPay) — mở app riêng
-    if (payment.deeplink) {
-      const canOpen = await Linking.canOpenURL(payment.deeplink);
-      if (canOpen) {
-        await Linking.openURL(payment.deeplink);
-        return { type: 'DEEPLINK', url: payment.deeplink };
+    console.log('[PaymentService] openPaymentGateway payment data:', {
+      hasDeeplink: !!payment.deeplink,
+      hasDeeplinkWallet: !!payment.deeplinkWallet,
+      hasPayUrl: !!payment.payUrl,
+      hasQrCodeUrl: !!payment.qrCodeUrl,
+      paymentMethod: payment.paymentMethod,
+      deeplink: payment.deeplink,
+      deeplinkWallet: payment.deeplinkWallet,
+    });
+    const deepLinks = [payment.deeplink, payment.deeplinkWallet].filter(Boolean);
+    for (const deepLink of deepLinks) {
+      if (deepLink) {
+        console.log('[PaymentService] Trying deep link:', deepLink);
+        const canOpen = await Linking.canOpenURL(deepLink);
+        if (canOpen) {
+          console.log('[PaymentService] Opening app via deeplink:', deepLink);
+          await Linking.openURL(deepLink);
+          return { type: 'DEEPLINK', url: deepLink };
+        }
+        console.warn('[PaymentService] Cannot open deeplink (may need app installed or rebuild):', deepLink);
       }
-      console.warn('[PaymentService] Cannot open deeplink:', payment.deeplink);
     }
 
     // Ưu tiên 2: Web URL (VNPay / trình duyệt)
     if (payment.payUrl) {
-      // Dùng openAuthSessionAsync để capture redirect URL từ VNPay returnUrl
-      const result = await WebBrowser.openAuthSessionAsync(
-        payment.payUrl,
-        MOBILE_PAYMENT_RETURN_URL,
-        {
-          toolbarColor: '#6366F1',
-          controlsColor: '#FFFFFF',
-          readerMode: false,
-          showInRecents: true,
+      try {
+        // Trên iOS với ZaloPay/MoMo: dùng openBrowserAsync (SFSafariViewController)
+        // để tránh ASWebAuthenticationSession sandbox chặn redirect sang app ví
+        const isAppToAppWallet = payment.paymentMethod === 'ZALOPAY' || payment.paymentMethod === 'MOMO';
+
+        if (Platform.OS === 'ios' && isAppToAppWallet) {
+          await WebBrowser.openBrowserAsync(payment.payUrl, {
+            toolbarColor: '#6366F1',
+            controlsColor: '#FFFFFF',
+            showInRecents: true,
+          });
+          return { type: 'WEB', url: payment.payUrl, callbackUrl: undefined };
         }
-      );
 
-      console.log('[PaymentService] openAuthSessionAsync result:', result);
+        // VNPay hoặc Android: dùng openAuthSessionAsync để nhận redirect callback
+        const result = await WebBrowser.openAuthSessionAsync(
+          payment.payUrl,
+          MOBILE_PAYMENT_RETURN_URL,
+          {
+            toolbarColor: '#6366F1',
+            controlsColor: '#FFFFFF',
+            readerMode: false,
+            showInRecents: true,
+          }
+        );
 
-      // result.type: 'success' = redirect captured (user completed and was redirected back)
-      // result.type: 'cancel' = user closed browser without completing
-      const callbackUrl = result.type === 'success' ? result.url : undefined;
+        console.log('[PaymentService] openAuthSessionAsync result:', result);
 
-      return { type: 'WEB', url: payment.payUrl, callbackUrl };
+        // result.type: 'success' = redirect captured (user completed and was redirected back)
+        // result.type: 'cancel' = user closed browser without completing
+        // result.type: 'dismiss' = browser was dismissed programmatically
+        const callbackUrl = result.type === 'success' ? result.url : undefined;
+
+        // Thử đóng browser sau khi nhận redirect
+        // (Trên standalone app: này sẽ đóng Chrome Custom Tab)
+        // (Trên Expo Go: có thể không hoạt động, user cần đóng thủ công)
+        if (result.type === 'success' || result.type === 'dismiss') {
+          try {
+            WebBrowser.dismissBrowser();
+            console.log('[PaymentService] Browser dismissed after redirect');
+          } catch (err) {
+            console.warn('[PaymentService] dismissBrowser failed (may not be supported on Expo Go):', err);
+          }
+        }
+
+        return { type: 'WEB', url: payment.payUrl, callbackUrl };
+      } catch (err) {
+        console.error('[PaymentService] openAuthSessionAsync failed:', err);
+        // Fallback: thử openBrowserAsync nếu openAuthSessionAsync thất bại
+        try {
+          await WebBrowser.openBrowserAsync(payment.payUrl, {
+            toolbarColor: '#6366F1',
+            controlsColor: '#FFFFFF',
+            showInRecents: true,
+          });
+          console.log('[PaymentService] openBrowserAsync fallback completed');
+          return { type: 'WEB', url: payment.payUrl, callbackUrl: undefined };
+        } catch (fallbackErr) {
+          console.error('[PaymentService] openBrowserAsync fallback also failed:', fallbackErr);
+          throw {
+            errorCode: 'NO_PAYMENT_URL',
+            message: 'Không thể mở cổng thanh toán',
+          };
+        }
+      }
     }
 
     // Ưu tiên 3: QR Code URL — hiển thị QR cho user quét
@@ -305,6 +367,7 @@ export const PaymentService = {
       { key: 'MOMO', label: 'MoMo', color: '#A50064' },
       { key: 'ZALOPAY', label: 'ZaloPay', color: '#0068FF' },
       { key: 'VNPAY', label: 'VNPay', color: '#AA2B52' },
+      { key: 'SEPAY', label: 'SePay (VietQR)', color: '#FF5E00' },
     ];
   },
 };

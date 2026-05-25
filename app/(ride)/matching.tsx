@@ -96,6 +96,28 @@ export default function MatchingScreen() {
   const [bookingInfo, setBookingInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
 
+  const getMethodColor = (method: string) => {
+    const colors: Record<string, string> = {
+      MOMO: '#A50064',
+      ZALOPAY: '#0068FF',
+      VNPAY: '#AA2B52',
+      SEPAY: '#FF5E00',
+      CASH: '#10B981',
+    };
+    return colors[method] || '#6366F1';
+  };
+
+  const getMethodLabel = (method: string) => {
+    const labels: Record<string, string> = {
+      MOMO: 'MoMo',
+      ZALOPAY: 'ZaloPay',
+      VNPAY: 'VNPay',
+      SEPAY: 'SePay (VietQR)',
+      CASH: 'Tiền mặt',
+    };
+    return labels[method] || method;
+  };
+
   // ── Parsed estimate data ────────────────────────────────────
   const parsedFare    = parseFloat(estimatedFare ?? '0');
   const parsedSurge  = parseFloat(surge ?? '1.0');
@@ -200,7 +222,7 @@ export default function MatchingScreen() {
     const payMethod  = booking.paymentMethod ?? paymentMethod ?? 'CASH';
     const fareAmount = booking.finalFare ?? booking.estimatedFare ?? parsedFare ?? 0;
 
-    if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY'].includes(payMethod)) {
+    if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'].includes(payMethod)) {
       setBookingStatus('PAID');
       stopPolling?.();
       router.replace({
@@ -259,7 +281,9 @@ export default function MatchingScreen() {
   const getStatusText = () => {
     switch (bookingStatus) {
       case 'CREATED':        return 'Đang khởi tạo...';
-      case 'PENDING_PAYMENT':return 'Chờ thanh toán VNPay';
+      case 'PENDING_PAYMENT':
+        const method = bookingInfo?.paymentMethod || paymentMethod || 'ONLINE';
+        return `Chờ thanh toán ${method === 'SEPAY' ? 'SePay' : method === 'ZALOPAY' ? 'ZaloPay' : method === 'MOMO' ? 'MoMo' : 'VNPay'}`;
       case 'FINDING':        return 'Đang tìm tài xế...';
       case 'FOUND':          return 'Đã tìm thấy tài xế';
       case 'ARRIVING':       return 'Tài xế đang đến';
@@ -273,7 +297,10 @@ export default function MatchingScreen() {
   const getStatusIcon = () => {
     switch (bookingStatus) {
       case 'CREATED':        return <ActivityIndicator size="small" color={Colors.light.primary} />;
-      case 'PENDING_PAYMENT':return <ActivityIndicator size="small" color="#AA2B52" />;
+      case 'PENDING_PAYMENT':
+        const method = bookingInfo?.paymentMethod || paymentMethod || 'ONLINE';
+        const color = method === 'SEPAY' ? '#FF5E00' : method === 'ZALOPAY' ? '#0068FF' : method === 'MOMO' ? '#A50064' : '#AA2B52';
+        return <ActivityIndicator size="small" color={color} />;
       case 'FINDING':        return <ActivityIndicator size="small" color="#F59E0B" />;
       case 'FOUND':          return <Text style={{ fontSize: 16 }}>👨‍✈️</Text>;
       case 'ARRIVING':       return <Text style={{ fontSize: 16 }}>🚗</Text>;
@@ -408,16 +435,17 @@ export default function MatchingScreen() {
             </View>
           )}
 
-          {/* ── VNPay pending payment ────────────────── */}
+          {/* ── Prepaid pending payment ────────────────── */}
           {isPendingPayment && (
             <View style={styles.vnpayContainer}>
               <Text style={styles.vnpaySubtext}>
                 Vui lòng thanh toán trước để hệ thống tìm tài xế cho bạn.
               </Text>
               <TouchableOpacity
-                style={styles.vnpayButton}
+                style={[styles.vnpayButton, { backgroundColor: getMethodColor(bookingInfo?.paymentMethod || paymentMethod || 'VNPAY') }]}
                 onPress={async () => {
                   try {
+                    const currentMethod = bookingInfo?.paymentMethod || paymentMethod || 'VNPAY';
                     const paymentInfo = await PaymentService.getPaymentByBooking(bookingId);
                     if (paymentInfo) {
                       const gatewayResult = await PaymentService.openPaymentGateway(paymentInfo);
@@ -447,16 +475,16 @@ export default function MatchingScreen() {
                       params: {
                         bookingId,
                         amount: (bookingInfo?.estimatedFare ?? parsedFare).toString(),
-                        paymentMethod: 'VNPAY',
+                        paymentMethod: currentMethod,
                         transactionId: paymentInfo?.transactionId ?? '',
                       },
                     });
                   } catch {
-                    Alert.alert('Lỗi', 'Không thể mở thanh toán VNPay. Vui lòng thử lại.');
+                    Alert.alert('Lỗi', `Không thể mở thanh toán ${getMethodLabel(bookingInfo?.paymentMethod || paymentMethod || 'VNPAY')}. Vui lòng thử lại.`);
                   }
                 }}
               >
-                <Text style={styles.vnpayButtonText}>Thanh toán VNPay ngay</Text>
+                <Text style={styles.vnpayButtonText}>Thanh toán ngay</Text>
               </TouchableOpacity>
               <TouchableOpacity
                 style={styles.vnpayCancelButton}

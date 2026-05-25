@@ -12,6 +12,7 @@ const PAYMENT_OPTIONS = [
   { key: 'MOMO', label: 'MoMo', color: '#A50064', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547580/logo-momo_s2zo3e.webp' },
   { key: 'ZALOPAY', label: 'ZaloPay', color: '#0068FF', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547673/zalopay-logo-png_seeklogo-391409_cqprbv.png' },
   { key: 'VNPAY', label: 'VNPay', color: '#AA2B52', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779547836/vnpay-logo-inkythuatso-01-13-16-29-51_qw15he.jpg' },
+  { key: 'SEPAY', label: 'SePay (VietQR)', color: '#FF5E00', logo: 'https://res.cloudinary.com/dh1o42tjk/image/upload/v1779610887/OIP_oopg4w.webp' },
 ];
 
 export default function PaymentMethodSelector({
