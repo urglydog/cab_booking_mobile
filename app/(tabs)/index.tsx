@@ -83,6 +83,7 @@ export default function HomeScreen() {
   const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = useState<any[]>([]);
   const [showTrackingModal, setShowTrackingModal] = useState(false);
+  const [matchedDriver, setMatchedDriver] = useState<any>(null);
 
   // Promo Carousel State & Animation
   const [currentPromoIdx, setCurrentPromoIdx] = useState(0);
@@ -241,6 +242,20 @@ export default function HomeScreen() {
   const ACTIVE_STATUSES = ['MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
   const latestBooking = recentBookings.find((b: any) => ACTIVE_STATUSES.includes(b.status));
   const isActive = !!latestBooking;
+
+  useEffect(() => {
+    if (latestBooking?.assignedDriverId) {
+      api.get(`/api/drivers/${latestBooking.assignedDriverId}/profile`)
+        .then(res => {
+          if (res.data?.result) {
+            setMatchedDriver(res.data.result);
+          }
+        })
+        .catch(err => console.log('Failed to fetch matched driver profile in home:', err));
+    } else {
+      setMatchedDriver(null);
+    }
+  }, [latestBooking?.assignedDriverId]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -508,9 +523,13 @@ export default function HomeScreen() {
                           <Text style={styles.modalDriverAvatarText}>TX</Text>
                         </View>
                         <View style={{ flex: 1, marginLeft: 12 }}>
-                          <Text style={styles.modalDriverName}>Tài xế Nguyễn Chí Thiện</Text>
-                          <Text style={styles.modalDriverSubtext}>Biển số: 59U1-123.45 • Trắng • Honda Vision</Text>
-                          <Text style={styles.modalDriverRating}>⭐ 4.9 (320 chuyến đi)</Text>
+                          <Text style={styles.modalDriverName}>{matchedDriver ? matchedDriver.fullName : 'Tài xế'}</Text>
+                          <Text style={styles.modalDriverSubtext}>
+                            {matchedDriver ? `Biển số: ${matchedDriver.vehiclePlate ?? 'N/A'} • ${matchedDriver.vehicleColor ?? 'N/A'} • ${matchedDriver.vehicleModel ?? 'N/A'}` : 'Đang tải xe...'}
+                          </Text>
+                          <Text style={styles.modalDriverRating}>
+                            ⭐ {matchedDriver?.averageRating ? Number(matchedDriver.averageRating).toFixed(1) : '5.0'} ({matchedDriver?.totalCompletedRides ?? 0} chuyến đi)
+                          </Text>
                         </View>
                       </View>
 
@@ -522,7 +541,7 @@ export default function HomeScreen() {
                             setShowTrackingModal(false);
                             router.push({
                               pathname: '/(ride)/chat',
-                              params: { bookingId: latestBooking.id, driverName: 'Tài xế Nguyễn Chí Thiện' }
+                              params: { bookingId: latestBooking.id, driverName: matchedDriver?.fullName ?? 'Tài xế' }
                             });
                           }}
                         >
@@ -533,7 +552,7 @@ export default function HomeScreen() {
                         <TouchableOpacity
                           style={styles.modalCallButton}
                           onPress={() => {
-                            Alert.alert('Gọi tài xế', 'Đang kết nối cuộc gọi đến tài xế Nguyễn Chí Thiện qua số +84 901234567...');
+                            Alert.alert('Gọi tài xế', `Đang kết nối cuộc gọi đến ${matchedDriver?.fullName ?? 'tài xế'} qua số ${matchedDriver?.phoneNumber ?? 'N/A'}...`);
                           }}
                         >
                           <Phone size={18} color="#2563EB" style={{ marginRight: 6 }} />
