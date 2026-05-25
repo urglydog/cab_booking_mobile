@@ -1,6 +1,7 @@
 import * as Linking from 'expo-linking';
 import * as WebBrowser from 'expo-web-browser';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { Platform } from 'react-native';
 import api from './api';
 
 WebBrowser.maybeCompleteAuthSession();
@@ -187,10 +188,20 @@ export const PaymentService = {
     // Ưu tiên 2: Web URL (VNPay / trình duyệt)
     if (payment.payUrl) {
       try {
-        // Dùng openAuthSessionAsync để:
-        // 1. Mở Chrome Custom Tab với VNPay
-        // 2. CHỜ cho đến khi user hoàn tất thanh toán và redirect xảy ra
-        // 3. Resolve với callbackUrl chứa kết quả thanh toán
+        const isAppToAppWallet = payment.paymentMethod === 'ZALOPAY' || payment.paymentMethod === 'MOMO';
+
+        if (Platform.OS === 'ios' && isAppToAppWallet) {
+          // Trên iOS, không dùng openAuthSessionAsync (ASWebAuthenticationSession) cho ZaloPay/MoMo
+          // vì nó chặn redirect sang app ví điện tử khác. Thay vào đó, dùng openBrowserAsync (SFSafariViewController).
+          await WebBrowser.openBrowserAsync(payment.payUrl, {
+            toolbarColor: '#6366F1',
+            controlsColor: '#FFFFFF',
+            showInRecents: true,
+          });
+          return { type: 'WEB', url: payment.payUrl, callbackUrl: undefined };
+        }
+
+        // Với VNPay hoặc chạy trên Android: dùng openAuthSessionAsync để lấy callbackUrl
         const result = await WebBrowser.openAuthSessionAsync(
           payment.payUrl,
           MOBILE_PAYMENT_RETURN_URL,
@@ -210,8 +221,6 @@ export const PaymentService = {
         const callbackUrl = result.type === 'success' ? result.url : undefined;
 
         // Thử đóng browser sau khi nhận redirect
-        // (Trên standalone app: này sẽ đóng Chrome Custom Tab)
-        // (Trên Expo Go: có thể không hoạt động, user cần đóng thủ công)
         if (result.type === 'success' || result.type === 'dismiss') {
           try {
             WebBrowser.dismissBrowser();
