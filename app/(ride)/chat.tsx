@@ -28,6 +28,28 @@ export default function ChatScreen() {
   useEffect(() => {
     if (!roomId) return;
 
+    const handleReceiveMessage = (data: any) => {
+      if (String(data?.bookingId ?? '') !== roomId) return;
+      
+      setMessages((prev) => {
+        // Prevent duplicate rendering if already loaded locally
+        if (data?.id && prev.some(m => m.id === data.id)) return prev;
+        if (prev.some(m => m.message === data.message && Math.abs(m.timestamp - (data.timestamp || 0)) < 2000)) return prev;
+
+        const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'DRIVER' ? 'DRIVER' : 'CUSTOMER';
+        const newMsg: Message = {
+          id: data?.id || `msg-${Date.now()}-${Math.random()}`,
+          sender,
+          message: String(data?.message ?? ''),
+          timestamp: data?.timestamp || Date.now(),
+        };
+        return [...prev, newMsg];
+      });
+      setTimeout(() => {
+        flatListRef.current?.scrollToEnd({ animated: true });
+      }, 100);
+    };
+
     const fetchBookingStatusAndInit = async () => {
       if (roomId.startsWith('booking-mock')) {
         setIsCompleted(true);
@@ -114,22 +136,6 @@ export default function ChatScreen() {
 
       if (socket) {
         socket.emit('join_room', roomId);
-
-        const handleReceiveMessage = (data: any) => {
-          if (String(data?.bookingId ?? '') !== roomId) return;
-          const sender = String(data?.sender ?? data?.senderRole ?? '').toUpperCase() === 'DRIVER' ? 'DRIVER' : 'CUSTOMER';
-          const newMsg: Message = {
-            id: `msg-${Date.now()}-${Math.random()}`,
-            sender,
-            message: String(data?.message ?? ''),
-            timestamp: data?.timestamp || Date.now(),
-          };
-          setMessages((prev) => [...prev, newMsg]);
-          setTimeout(() => {
-            flatListRef.current?.scrollToEnd({ animated: true });
-          }, 100);
-        };
-
         socket.on('receive_message', handleReceiveMessage);
       }
     };
@@ -139,7 +145,7 @@ export default function ChatScreen() {
     return () => {
       if (socket && roomId) {
         socket.emit('leave_room', roomId);
-        socket.off('receive_message');
+        socket.off('receive_message', handleReceiveMessage);
       }
     };
   }, [socket, roomId]);
@@ -147,12 +153,22 @@ export default function ChatScreen() {
   const handleSendMessage = () => {
     if (!inputText.trim() || !socket || !roomId) return;
 
+    const messageId = `msg-${Date.now()}-${Math.random()}`;
     const payload = {
+      id: messageId,
       bookingId: roomId,
       sender: 'CUSTOMER',
       message: inputText.trim(),
       timestamp: Date.now(),
     };
+
+    // Instant local append
+    setMessages((prev) => [...prev, {
+      id: messageId,
+      sender: 'CUSTOMER',
+      message: inputText.trim(),
+      timestamp: Date.now()
+    }]);
 
     socket.emit('send_message', payload);
     setInputText('');

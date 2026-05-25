@@ -41,6 +41,7 @@ export const SocketProvider: React.FC<{ children: React.ReactNode, userId: strin
           query: { 
             userId,
             token: token || '', // Fallback query param for some server variants
+            access_token: token || '', // Standard query parameter recognized by Spring Security BearerTokenResolver
           },
           auth: {
             token: token || '', // Standard Socket.IO v4 handshake auth object
