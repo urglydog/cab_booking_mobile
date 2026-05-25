@@ -5,12 +5,12 @@ import {
   SafeAreaView, Alert, Modal, Image, Dimensions, ScrollView
 } from 'react-native';
 import { useRouter } from 'expo-router';
-import { ChevronLeft, Send, Bot, User, AlertTriangle, Mic, Image as ImageIcon, MapPin, Car, CreditCard, X, Sparkles } from 'lucide-react-native';
+import { ChevronLeft, Send, Bot, User, AlertTriangle, Mic, X, Sparkles } from 'lucide-react-native';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PricingService, calculateFallbackFare } from '@/services/pricingService';
-import { PaymentInitResponse, PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
+import { PaymentInitResponse, PaymentMethod, PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 
 interface Message {
   id: string;
@@ -23,7 +23,7 @@ interface Message {
 const QUICK_PROMPTS = [
   '🚗 Đặt xe nhanh',
   '💰 Tra cứu bảng giá',
-  '🗺️ Hỏi đường đi',
+  '🗺️ Ước tính lộ trình',
   '📞 Liên hệ hỗ trợ',
 ];
 
@@ -33,26 +33,104 @@ const PROMO_LIST = [
   { code: 'CABVIP', title: 'CAB Tri ân VIP 💎', discount: 50000, desc: 'Mã VIP giảm giá cực khủng 50.000đ' },
 ];
 
-const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY'];
+const ONLINE_PAYMENT_METHODS: PaymentMethod[] = ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'];
+const PAYMENT_METHODS: { key: PaymentMethod; label: string }[] = [
+  { key: 'CASH', label: '💵 Tiền mặt' },
+  { key: 'MOMO', label: '🌸 MoMo' },
+  { key: 'ZALOPAY', label: '💙 ZaloPay' },
+  { key: 'VNPAY', label: '🔴 VNPay' },
+  { key: 'SEPAY', label: '🧾 SePay' },
+];
 
 const waitForPaymentByBooking = async (bookingId: string) => {
-  for (let attempt = 0; attempt < 6; attempt += 1) {
+  let waitMs = 1000;
+  for (let attempt = 0; attempt < 30; attempt += 1) {
     const paymentInfo = await PaymentService.getPaymentByBooking(bookingId);
     if (paymentInfo?.transactionId) return paymentInfo;
-    await new Promise(resolve => setTimeout(resolve, 1000));
+    await new Promise(resolve => setTimeout(resolve, waitMs));
+    waitMs = Math.min(waitMs * 1.2, 5000);
   }
   return null;
 };
 
-const FAMOUS_LOCATIONS: Record<string, { lat: number; lng: number; name: string }> = {
-  'iuh': { lat: 10.822, lng: 106.687, name: 'Đại học Công nghiệp TP.HCM (IUH)' },
-  'đại học công nghiệp': { lat: 10.822, lng: 106.687, name: 'Đại học Công nghiệp TP.HCM (IUH)' },
-  'landmark 81': { lat: 10.794, lng: 106.721, name: 'Tòa nhà Landmark 81, Bình Thạnh' },
-  'sân bay': { lat: 10.816, lng: 106.663, name: 'Sân bay Quốc tế Tân Sơn Nhất' },
-  'tân sơn nhất': { lat: 10.816, lng: 106.663, name: 'Sân bay Quốc tế Tân Sơn Nhất' },
-  'dinh độc lập': { lat: 10.776, lng: 106.695, name: 'Dinh Độc Lập, Quận 1' },
-  'đại học văn lang': { lat: 10.826, lng: 106.698, name: 'Đại học Văn Lang, Cơ sở 3' },
-  'văn lang': { lat: 10.826, lng: 106.698, name: 'Đại học Văn Lang, Cơ sở 3' },
+const LOCAL_PLACE_ALIASES = [
+  {
+    aliases: ['iuh', 'đại học công nghiệp', 'truong dai hoc cong nghiep', 'dai hoc cong nghiep'],
+    name: 'Trường Đại học Công nghiệp TP.HCM (IUH) - 12 Nguyễn Văn Bảo, Gò Vấp, TP.HCM',
+    lat: 10.8221,
+    lng: 106.6885,
+  },
+  {
+    aliases: ['landmark 81', 'landmark'],
+    name: 'Landmark 81 - 720A Điện Biên Phủ, Bình Thạnh, TP.HCM',
+    lat: 10.7948,
+    lng: 106.7218,
+  },
+  {
+    aliases: ['sân bay', 'tan son nhat', 'tân sơn nhất', 'sgn'],
+    name: 'Sân bay Quốc tế Tân Sơn Nhất - Trường Sơn, Tân Bình, TP.HCM',
+    lat: 10.8188,
+    lng: 106.6619,
+  },
+  {
+    aliases: ['dinh độc lập', 'dinh doc lap'],
+    name: 'Dinh Độc Lập - Quận 1, TP.HCM',
+    lat: 10.776,
+    lng: 106.695,
+  },
+  {
+    aliases: ['văn lang', 'van lang', 'đại học văn lang'],
+    name: 'Trường Đại học Văn Lang Cơ sở 3 - Bình Thạnh, TP.HCM',
+    lat: 10.8275,
+    lng: 106.7011,
+  },
+];
+
+const HCM_GEOCODE_BBOX = '106.35,10.35,107.15,11.25';
+const HCM_GEOCODE_PROXIMITY = '106.7009,10.7769';
+
+const normalizeText = (value: string) =>
+  value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/đ/g, 'd')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+const buildGeocodeQueries = (address: string) => {
+  const cleaned = address.trim().replace(/[.?!]+$/g, '');
+  const normalized = normalizeText(cleaned)
+    .replace(/\bq\s*(\d+)\b/g, 'quan $1')
+    .replace(/\bp\s+([\w\s]+)/g, 'phuong $1');
+  const hasHcm = /\b(ho chi minh|hcm|tphcm|tp\.hcm|sai gon|sài gòn)\b/i.test(cleaned);
+  const hcmSuffix = hasHcm ? '' : ', TP. Hồ Chí Minh, Việt Nam';
+  return Array.from(new Set([
+    `${cleaned}${hcmSuffix}`,
+    `${normalized}${hasHcm ? '' : ', ho chi minh, viet nam'}`,
+    cleaned,
+  ].filter(Boolean)));
+};
+
+type ResolvedPlace = {
+  name: string;
+  coords: { latitude: number; longitude: number };
+};
+
+type BookingIntent = {
+  pickup: string;
+  dropoff: string;
+  pickupCoords: { latitude: number; longitude: number };
+  dropoffCoords: { latitude: number; longitude: number };
+  fare: number;
+  vehicle: 'BIKE' | 'CAR4' | 'CAR7';
+  payment: PaymentMethod;
+  estimateId?: string;
+  quoteId?: string;
+  quotePayloadHash?: string;
+  quoteHashAlgorithm?: string;
+  quoteExpiresAt?: string;
+  surgeMultiplier?: number;
 };
 
 const generateRouteCoords = (
@@ -85,7 +163,7 @@ export default function AIChatScreen() {
     {
       id: '0',
       role: 'assistant',
-      content: 'Xin chào! Tôi là trợ lý AI thông minh của CAB Booking 🚖\n\nTôi có thể giúp bạn:\n• Đặt xe nhanh bằng giọng nói / chat 🚗\n• Tra cứu giá cước thời gian thực 💰\n• Phân tích hình ảnh địa danh & lập lộ trình 🗺️\n\nBạn muốn đi đâu hôm nay?',
+      content: 'Xin chào! Tôi là trợ lý đặt xe CAB Booking 🚖\n\nTôi có thể giúp bạn:\n• Đặt xe bằng tin nhắn hoặc giọng nói\n• Xác định địa chỉ trên bản đồ và báo giá\n• Hỗ trợ thanh toán tiền mặt, MoMo, ZaloPay, VNPay, SePay\n\nBạn muốn đi từ đâu đến đâu hôm nay?',
       timestamp: new Date(),
     }
   ]);
@@ -104,31 +182,13 @@ export default function AIChatScreen() {
 
   // Booking Confirmation Popup states
   const [isBookingModalVisible, setIsBookingModalVisible] = useState(false);
-  const [bookingDetails, setBookingDetails] = useState<{
-    pickup: string;
-    dropoff: string;
-    pickupCoords: { latitude: number; longitude: number };
-    dropoffCoords: { latitude: number; longitude: number };
-    fare: number;
-    vehicle: 'BIKE' | 'CAR4' | 'CAR7';
-    payment: 'CASH' | 'MOMO' | 'ZALOPAY' | 'VNPAY';
-    estimateId?: string;
-    quotePayloadHash?: string;
-    surgeMultiplier?: number;
-  } | null>(null);
+  const [bookingDetails, setBookingDetails] = useState<BookingIntent | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
 
   // Promo Selector states (Alternating modal trigger to prevent overlay block on Android/iOS)
   const [isPromoListVisible, setIsPromoListVisible] = useState(false);
   const [appliedDiscount, setAppliedDiscount] = useState(0);
   const [appliedPromoCode, setAppliedPromoCode] = useState('');
-
-  const handleOpenPromoList = () => {
-    setIsBookingModalVisible(false);
-    setTimeout(() => {
-      setIsPromoListVisible(true);
-    }, 350); // wait for booking modal to close smoothly before popping promo list
-  };
 
   const handleClosePromoList = () => {
     setIsPromoListVisible(false);
@@ -153,7 +213,7 @@ export default function AIChatScreen() {
 
   // Voice recording mock process
   useEffect(() => {
-    let interval: NodeJS.Timeout;
+    let interval: ReturnType<typeof setInterval>;
     if (isVoiceModalVisible) {
       setVoiceTimer(3);
       interval = setInterval(() => {
@@ -190,62 +250,150 @@ export default function AIChatScreen() {
     }
   };
 
-  const parseBookingIntent = (text: string) => {
+  const resolvePlace = async (rawAddress: string): Promise<ResolvedPlace | null> => {
+    const address = rawAddress.trim().replace(/[.?!]+$/g, '');
+    if (!address) return null;
+
+    const normalized = normalizeText(address);
+    const localMatch = LOCAL_PLACE_ALIASES.find(place =>
+      place.aliases.some(alias => normalized === normalizeText(alias) || normalized.includes(normalizeText(alias)))
+    );
+    if (localMatch) {
+      return {
+        name: localMatch.name,
+        coords: { latitude: localMatch.lat, longitude: localMatch.lng },
+      };
+    }
+
+    const MAPBOX_KEY = process.env.EXPO_PUBLIC_MAPBOX_API_KEY ?? '';
+    if (!MAPBOX_KEY) return null;
+
+    try {
+      for (const query of buildGeocodeQueries(address)) {
+        const params = new URLSearchParams({
+          access_token: MAPBOX_KEY,
+          country: 'vn',
+          limit: '3',
+          language: 'vi',
+          bbox: HCM_GEOCODE_BBOX,
+          proximity: HCM_GEOCODE_PROXIMITY,
+        });
+        const response = await fetch(
+          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params.toString()}`
+        );
+        const data = await response.json();
+        const feature = data.features?.find((item: any) => item?.geometry?.coordinates);
+        if (!feature?.geometry?.coordinates) continue;
+        const [lng, lat] = feature.geometry.coordinates;
+        return {
+          name: feature.place_name ?? address,
+          coords: { latitude: lat, longitude: lng },
+        };
+      }
+      return null;
+    } catch (err) {
+      console.log('[AI Chat] Geocoding failed:', err);
+      return null;
+    }
+  };
+
+  const extractRouteText = (text: string) => {
+    const compact = text
+      .replace(/\s+/g, ' ')
+      .replace(/^(đặt|dat|gọi|goi|book)\s+(cho\s+tôi\s+|giúp\s+tôi\s+)?(một\s+)?(chuyến\s+)?(xe\s+)?(máy|ô tô|oto|4 chỗ|7 chỗ|car4|car7|bike)?\s*/i, '')
+      .trim();
+
+    const patterns = [
+      /(?:đi\s+)?từ\s+(.+?)\s+(?:đến|tới|qua|về)\s+(.+)$/i,
+      /(.+?)\s+(?:đến|tới|qua|về)\s+(.+)$/i,
+    ];
+
+    for (const pattern of patterns) {
+      const match = compact.match(pattern);
+      if (match?.[1] && match?.[2]) {
+        return {
+          pickupText: match[1].trim(),
+          dropoffText: match[2].trim(),
+        };
+      }
+    }
+
+    return null;
+  };
+
+  const parseBookingIntent = async (text: string): Promise<BookingIntent | { error: string } | null> => {
     const lowerText = text.toLowerCase();
-    
-    // Check if message is related to booking/ordering
-    const isBooking = lowerText.includes('đặt xe') || lowerText.includes('đặt chuyến') || lowerText.includes('gọi xe') || lowerText.includes('đi từ');
+    const isBooking = lowerText.includes('đặt xe')
+      || lowerText.includes('đặt chuyến')
+      || lowerText.includes('gọi xe')
+      || lowerText.includes('book xe')
+      || lowerText.includes('đi từ')
+      || lowerText.includes(' từ ');
     if (!isBooking) return null;
 
-    // Detect locations
-    let pickupLoc = 'Đại học Công nghiệp TP.HCM (IUH)';
-    let dropoffLoc = 'Tòa nhà Landmark 81, Bình Thạnh';
-    let pickupCoords = FAMOUS_LOCATIONS['iuh'];
-    let dropoffCoords = FAMOUS_LOCATIONS['landmark 81'];
+    const route = extractRouteText(text);
+    if (!route?.pickupText || !route?.dropoffText) {
+      return {
+        error: 'Bạn cho tôi đủ điểm đón và điểm đến theo dạng: "Đặt xe từ [địa chỉ đón] đến [địa chỉ đến]".',
+      };
+    }
 
-    // Scan for matched locations in text
-    Object.entries(FAMOUS_LOCATIONS).forEach(([key, val]) => {
-      if (lowerText.includes(key)) {
-        if (lowerText.indexOf(key) < lowerText.indexOf('đến') && lowerText.includes('đến')) {
-          pickupLoc = val.name;
-          pickupCoords = val;
-        } else {
-          dropoffLoc = val.name;
-          dropoffCoords = val;
-        }
-      }
-    });
+    const [pickupPlace, dropoffPlace] = await Promise.all([
+      resolvePlace(route.pickupText),
+      resolvePlace(route.dropoffText),
+    ]);
 
-    // Determine vehicle type (BIKE, CAR4, CAR7)
+    if (!pickupPlace || !dropoffPlace) {
+      const missing = [
+        !pickupPlace ? `điểm đón "${route.pickupText}"` : null,
+        !dropoffPlace ? `điểm đến "${route.dropoffText}"` : null,
+      ].filter(Boolean).join(' và ');
+      return {
+        error: `Tôi chưa xác định được chính xác ${missing} trên bản đồ. Bạn vui lòng nhập địa chỉ cụ thể hơn, ví dụ thêm phường/quận/thành phố.`,
+      };
+    }
+
     let vehicle: 'BIKE' | 'CAR4' | 'CAR7' = 'CAR4';
     if (lowerText.includes('xe máy') || lowerText.includes('bike') || lowerText.includes('xe ôm')) {
       vehicle = 'BIKE';
     } else if (lowerText.includes('7 chỗ') || lowerText.includes('premium') || lowerText.includes('vip') || lowerText.includes('car7')) {
       vehicle = 'CAR7';
-    } else {
-      vehicle = 'CAR4';
     }
 
-    // Call professional calculateFallbackFare to keep it 100% in sync with manual booking
     const calculatedFare = calculateFallbackFare(
-      pickupCoords.lat,
-      pickupCoords.lng,
-      dropoffCoords.lat,
-      dropoffCoords.lng,
+      pickupPlace.coords.latitude,
+      pickupPlace.coords.longitude,
+      dropoffPlace.coords.latitude,
+      dropoffPlace.coords.longitude,
       vehicle
     );
-    // Round to nearest 1000 VND for visual clarity
-    const fare = Math.round(calculatedFare / 1000) * 1000;
 
     return {
-      pickup: pickupLoc,
-      dropoff: dropoffLoc,
-      pickupCoords: { latitude: pickupCoords.lat, longitude: pickupCoords.lng },
-      dropoffCoords: { latitude: dropoffCoords.lat, longitude: dropoffCoords.lng },
-      fare,
+      pickup: pickupPlace.name,
+      dropoff: dropoffPlace.name,
+      pickupCoords: pickupPlace.coords,
+      dropoffCoords: dropoffPlace.coords,
+      fare: Math.round(calculatedFare / 1000) * 1000,
       vehicle,
-      payment: 'CASH' as const
+      payment: 'CASH',
     };
+  };
+
+  const getLocalAssistantReply = (text: string) => {
+    const normalized = normalizeText(text);
+    if (/^(hi|hello|hey|chao|xin chao|alo)$/.test(normalized)) {
+      return 'Xin chào! Tôi có thể hỗ trợ bạn đặt xe bằng câu lệnh như: "Đặt xe từ 252/43 Vườn Lài, An Phú Đông, Quận 12 đến IUH", tra giá cước, hoặc cung cấp hotline hỗ trợ.';
+    }
+    if (normalized.includes('mat khau') || normalized.includes('password') || normalized.includes('admin') || normalized.includes('phan quyen')) {
+      return 'Tôi không có quyền xem, đổi mật khẩu, truy cập dữ liệu quản trị hoặc phân quyền hệ thống. Tôi chỉ hỗ trợ đặt xe, ước tính giá và thông tin hỗ trợ khách hàng.';
+    }
+    if (normalized.includes('bang gia') || normalized.includes('gia cuoc') || normalized.includes('tinh gia') || normalized.includes('bao nhieu tien')) {
+      return 'Giá cước chính xác sẽ được tính theo lộ trình thật khi có điểm đón và điểm đến. Bạn có thể nhắn: "Tính giá từ [địa chỉ đón] đến [địa chỉ đến]" hoặc "Đặt xe từ [địa chỉ đón] đến [địa chỉ đến]".';
+    }
+    if (normalized.includes('hotline') || normalized.includes('ho tro') || normalized.includes('lien he')) {
+      return 'Bạn có thể liên hệ CAB Booking qua hotline 1900 1234 hoặc email support@cabbooking.vn.';
+    }
+    return null;
   };
 
   const sendMessage = async (text?: string) => {
@@ -255,7 +403,11 @@ export default function AIChatScreen() {
 
     // Check Auth first
     const token = await AsyncStorage.getItem('access_token');
-    const isBookingRequest = messageText.toLowerCase().includes('đặt xe') || messageText.toLowerCase().includes('gọi xe');
+    const normalizedMessage = normalizeText(messageText);
+    const isBookingRequest = normalizedMessage.includes('dat xe')
+      || normalizedMessage.includes('goi xe')
+      || normalizedMessage.includes('book xe')
+      || normalizedMessage.includes('dat chuyen');
     
     if (isBookingRequest && !token) {
       setMessages(prev => [
@@ -290,9 +442,20 @@ export default function AIChatScreen() {
     await new Promise(resolve => setTimeout(resolve, 1200));
 
     // Check if AI can process booking popup locally for smooth UX
-    const bookingIntent = parseBookingIntent(messageText);
+    const bookingIntent = await parseBookingIntent(messageText);
 
     try {
+      if (bookingIntent && 'error' in bookingIntent) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: bookingIntent.error,
+          timestamp: new Date(),
+        }]);
+        setLoading(false);
+        return;
+      }
+
       if (bookingIntent) {
         console.log('[AI Chat] Lấy báo giá chính thức từ Pricing Service trước khi hiển thị popup...');
         const idempotencyKey = `${Date.now()}_ai_est_${Math.random().toString(36).substring(2, 10)}`;
@@ -309,7 +472,10 @@ export default function AIChatScreen() {
           );
           bookingIntent.fare = officialEstimate.totalFare;
           bookingIntent.estimateId = officialEstimate.estimateId;
+          bookingIntent.quoteId = officialEstimate.quoteId;
           bookingIntent.quotePayloadHash = officialEstimate.quotePayloadHash;
+          bookingIntent.quoteHashAlgorithm = officialEstimate.quoteHashAlgorithm;
+          bookingIntent.quoteExpiresAt = officialEstimate.expiresAt;
           bookingIntent.surgeMultiplier = officialEstimate.surgeMultiplier;
           console.log('[AI Chat] Báo giá chính xác từ backend:', bookingIntent.fare);
         } catch (estErr) {
@@ -332,6 +498,18 @@ export default function AIChatScreen() {
         setAppliedPromoCode('');
         setIsBookingModalVisible(true);
         setLoading(false);
+        return;
+      }
+
+      const localReply = getLocalAssistantReply(messageText);
+      if (localReply) {
+        setMessages(prev => [...prev, {
+          id: (Date.now() + 1).toString(),
+          role: 'assistant',
+          content: localReply,
+          timestamp: new Date(),
+        }]);
+        setQuotaExceeded(false);
         return;
       }
 
@@ -380,7 +558,11 @@ export default function AIChatScreen() {
       vehicle: vehicleType, 
       fare: localFare,
       estimateId: undefined, // Clear old quote metadata to force correct verification
-      quotePayloadHash: undefined 
+      quoteId: undefined,
+      quotePayloadHash: undefined,
+      quoteHashAlgorithm: undefined,
+      quoteExpiresAt: undefined,
+      surgeMultiplier: undefined,
     } : null);
 
     // 2. Fetch official pricing in background for the newly selected vehicle
@@ -404,7 +586,10 @@ export default function AIChatScreen() {
           ...prev,
           fare: officialEstimate.totalFare,
           estimateId: officialEstimate.estimateId,
+          quoteId: officialEstimate.quoteId,
           quotePayloadHash: officialEstimate.quotePayloadHash,
+          quoteHashAlgorithm: officialEstimate.quoteHashAlgorithm,
+          quoteExpiresAt: officialEstimate.expiresAt,
           surgeMultiplier: officialEstimate.surgeMultiplier
         };
       });
@@ -419,11 +604,18 @@ export default function AIChatScreen() {
     setConfirmLoading(true);
 
     try {
-      const userId = await AsyncStorage.getItem('user_id') || '';
+      const token = await AsyncStorage.getItem('access_token');
+      if (!token) {
+        Alert.alert('Yêu cầu đăng nhập', 'Bạn cần đăng nhập trước khi xác nhận đặt xe.');
+        return;
+      }
       const idempotencyKey = `${Date.now()}_ai_${Math.random().toString(36).substring(2, 10)}`;
 
       let estimateId = bookingDetails.estimateId;
+      let quoteId = bookingDetails.quoteId;
       let quotePayloadHash = bookingDetails.quotePayloadHash;
+      let quoteHashAlgorithm = bookingDetails.quoteHashAlgorithm;
+      let quoteExpiresAt = bookingDetails.quoteExpiresAt;
       let surgeMultiplier = bookingDetails.surgeMultiplier ?? 1.0;
       let baseFare = bookingDetails.fare;
 
@@ -439,7 +631,10 @@ export default function AIChatScreen() {
         };
         const estimate = await PricingService.createEstimate(pricingPayload, `${idempotencyKey}_pricing`);
         estimateId = estimate.estimateId;
+        quoteId = estimate.quoteId;
         quotePayloadHash = estimate.quotePayloadHash;
+        quoteHashAlgorithm = estimate.quoteHashAlgorithm;
+        quoteExpiresAt = estimate.expiresAt;
         baseFare = estimate.totalFare;
         surgeMultiplier = estimate.surgeMultiplier ?? 1.0;
       }
@@ -466,7 +661,10 @@ export default function AIChatScreen() {
         estimatedFare: finalFare,
         promoCode: appliedPromoCode || '',
         estimateId: estimateId ?? '',
+        quoteId: quoteId ?? '',
         quotePayloadHash: quotePayloadHash ?? '',
+        quoteHashAlgorithm: quoteHashAlgorithm ?? 'SHA-256',
+        quoteExpiresAt: quoteExpiresAt ?? '',
         surgeMultiplier: surgeMultiplier,
         idempotencyKey,
       };
@@ -496,8 +694,11 @@ export default function AIChatScreen() {
         try {
           paymentInfo = await waitForPaymentByBooking(bookingId);
           if (!paymentInfo) {
-            Alert.alert('Chưa có giao dịch', 'Hệ thống chưa tạo được giao dịch thanh toán. Vui lòng thử lại sau.');
-            return;
+            paymentInfo = await PaymentService.initPayment({
+              bookingId,
+              amount: finalFare,
+              paymentMethod: bookingDetails.payment,
+            });
           }
 
           const gatewayResult = await PaymentService.openPaymentGateway(paymentInfo);
@@ -647,9 +848,11 @@ export default function AIChatScreen() {
               style={styles.quickPromptBtn}
               onPress={() => {
                 if (prompt.includes('Đặt xe')) {
-                  sendMessage('Đặt xe ô tô đi từ IUH đến Landmark 81');
+                  sendMessage('Đặt xe ô tô từ IUH đến Landmark 81');
                 } else if (prompt.includes('bảng giá')) {
                   sendMessage('Bảng giá xe ôm và xe ô tô tính thế nào?');
+                } else if (prompt.includes('lộ trình')) {
+                  sendMessage('Tính giá từ IUH đến Sân bay Tân Sơn Nhất');
                 } else {
                   sendMessage(prompt.replace(/^[^\s]+\s/, ''));
                 }
@@ -680,7 +883,7 @@ export default function AIChatScreen() {
         </View>
       )}
 
-      {/* Input row with mic and camera buttons */}
+      {/* Input row */}
       <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : 'height'}>
         <View style={styles.inputRow}>
           {/* Voice Mic Button */}
@@ -690,15 +893,6 @@ export default function AIChatScreen() {
             activeOpacity={0.7}
           >
             <Mic size={22} color="#4F46E5" />
-          </TouchableOpacity>
-
-          {/* Image Upload Button */}
-          <TouchableOpacity 
-            style={styles.actionBtn}
-            onPress={() => setIsImageModalVisible(true)}
-            activeOpacity={0.7}
-          >
-            <ImageIcon size={22} color="#10B981" />
           </TouchableOpacity>
 
           <TextInput
@@ -712,9 +906,9 @@ export default function AIChatScreen() {
             onSubmitEditing={() => sendMessage()}
           />
           <TouchableOpacity
-            style={[styles.sendBtn, (!input.trim() && !attachedImage || loading) && styles.sendBtnDisabled]}
+            style={[styles.sendBtn, (!input.trim() || loading) && styles.sendBtnDisabled]}
             onPress={() => sendMessage()}
-            disabled={!input.trim() && !attachedImage || loading}
+            disabled={!input.trim() || loading}
           >
             <Send size={18} color="#fff" />
           </TouchableOpacity>
@@ -882,30 +1076,17 @@ export default function AIChatScreen() {
                       style={styles.paymentScrollRow}
                       contentContainerStyle={{ gap: 8, paddingVertical: 4 }}
                     >
-                      <TouchableOpacity 
-                        style={[styles.paymentPill, bookingDetails.payment === 'CASH' && styles.paymentPillSelected]}
-                        onPress={() => setBookingDetails(prev => prev ? { ...prev, payment: 'CASH' } : null)}
-                      >
-                        <Text style={[styles.paymentPillText, bookingDetails.payment === 'CASH' && styles.paymentPillTextSelected]}>💵 Tiền mặt</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.paymentPill, bookingDetails.payment === 'MOMO' && styles.paymentPillSelected]}
-                        onPress={() => setBookingDetails(prev => prev ? { ...prev, payment: 'MOMO' } : null)}
-                      >
-                        <Text style={[styles.paymentPillText, bookingDetails.payment === 'MOMO' && styles.paymentPillTextSelected]}>🌸 MoMo</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.paymentPill, bookingDetails.payment === 'ZALOPAY' && styles.paymentPillSelected]}
-                        onPress={() => setBookingDetails(prev => prev ? { ...prev, payment: 'ZALOPAY' } : null)}
-                      >
-                        <Text style={[styles.paymentPillText, bookingDetails.payment === 'ZALOPAY' && styles.paymentPillTextSelected]}>💙 ZaloPay</Text>
-                      </TouchableOpacity>
-                      <TouchableOpacity 
-                        style={[styles.paymentPill, bookingDetails.payment === 'VNPAY' && styles.paymentPillSelected]}
-                        onPress={() => setBookingDetails(prev => prev ? { ...prev, payment: 'VNPAY' } : null)}
-                      >
-                        <Text style={[styles.paymentPillText, bookingDetails.payment === 'VNPAY' && styles.paymentPillTextSelected]}>🔴 VNPay</Text>
-                      </TouchableOpacity>
+                      {PAYMENT_METHODS.map(method => (
+                        <TouchableOpacity
+                          key={method.key}
+                          style={[styles.paymentPill, bookingDetails.payment === method.key && styles.paymentPillSelected]}
+                          onPress={() => setBookingDetails(prev => prev ? { ...prev, payment: method.key } : null)}
+                        >
+                          <Text style={[styles.paymentPillText, bookingDetails.payment === method.key && styles.paymentPillTextSelected]}>
+                            {method.label}
+                          </Text>
+                        </TouchableOpacity>
+                      ))}
                     </ScrollView>
                   </View>
 
@@ -1230,7 +1411,7 @@ const styles = StyleSheet.create({
     borderWidth: 1.5, borderColor: 'transparent',
   },
   pillSelected: { backgroundColor: '#EEF2FF', borderColor: '#4F46E5' },
-  pillText: { fontSize: 10.5, fontWeight: '750', color: '#4B5563' },
+  pillText: { fontSize: 10.5, fontWeight: '700', color: '#4B5563' },
   pillTextSelected: { color: '#4F46E5' },
   
   // Horizontal scrollable payment methods container
@@ -1255,7 +1436,7 @@ const styles = StyleSheet.create({
   },
   paymentPillText: {
     fontSize: 11,
-    fontWeight: '750',
+    fontWeight: '700',
     color: '#4B5563',
   },
   paymentPillTextSelected: {
@@ -1291,7 +1472,7 @@ const styles = StyleSheet.create({
     textDecorationLine: 'line-through',
     marginBottom: 2,
   },
-  fareAmount: { fontSize: 18, fontWeight: '950', color: '#4F46E5' },
+  fareAmount: { fontSize: 18, fontWeight: '900', color: '#4F46E5' },
   confirmBtn: {
     backgroundColor: '#4F46E5', height: 52, borderRadius: 16,
     justifyContent: 'center', alignItems: 'center',
