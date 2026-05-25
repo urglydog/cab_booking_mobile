@@ -95,6 +95,22 @@ export default function MatchingScreen() {
   const [bookingStatus, setBookingStatus] = useState<string>('CREATED');
   const [bookingInfo, setBookingInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [matchedDriver, setMatchedDriver] = useState<any>(null);
+
+  useEffect(() => {
+    const driverId = bookingInfo?.assignedDriverId ?? bookingInfo?.driverId;
+    if (driverId) {
+      api.get(`/api/drivers/${driverId}/profile`)
+        .then(res => {
+          if (res.data?.result) {
+            setMatchedDriver(res.data.result);
+          }
+        })
+        .catch(err => console.log('Failed to fetch matched driver profile in matching:', err));
+    } else {
+      setMatchedDriver(null);
+    }
+  }, [bookingInfo?.assignedDriverId, bookingInfo?.driverId]);
 
   const getMethodColor = (method: string) => {
     const colors: Record<string, string> = {
@@ -370,14 +386,48 @@ export default function MatchingScreen() {
             <Text style={styles.statusText}>{getStatusText()}</Text>
           </View>
 
-          {bookingInfo?.driverId && !['COMPLETED', 'PAID'].includes(bookingStatus) && (
-            <TouchableOpacity
-              style={styles.chatButton}
-              onPress={() => router.push({ pathname: '/(ride)/chat', params: { bookingId: String(bookingId), driverName: bookingInfo?.driverName ?? bookingInfo?.driverId ?? 'Tài xế' } })}
-            >
-              <MessageSquare size={16} color="#2563EB" />
-              <Text style={styles.chatButtonText}>Chat với tài xế</Text>
-            </TouchableOpacity>
+          {(bookingInfo?.assignedDriverId || bookingInfo?.driverId) && !['COMPLETED', 'PAID'].includes(bookingStatus) && (
+            <View style={styles.driverCard}>
+              <View style={styles.driverInfoRow}>
+                <View style={styles.driverAvatar}>
+                  <Text style={styles.driverAvatarText}>TX</Text>
+                </View>
+                <View style={styles.driverDetails}>
+                  <Text style={styles.driverName}>
+                    {matchedDriver ? matchedDriver.fullName : 'Đang kết nối tài xế...'}
+                  </Text>
+                  <Text style={styles.driverVehicle}>
+                    {matchedDriver ? `Biển số: ${matchedDriver.vehiclePlate ?? 'N/A'} • ${matchedDriver.vehicleColor ?? 'N/A'} • ${matchedDriver.vehicleModel ?? 'N/A'}` : 'Đang tải xe...'}
+                  </Text>
+                  <Text style={styles.driverRating}>
+                    ⭐ {matchedDriver?.averageRating ? Number(matchedDriver.averageRating).toFixed(1) : '5.0'} ({matchedDriver?.totalCompletedRides ?? 0} chuyến đi)
+                  </Text>
+                </View>
+              </View>
+
+              {/* Chat and Call actions */}
+              <View style={styles.driverActions}>
+                <TouchableOpacity
+                  style={styles.chatActionBtn}
+                  onPress={() => router.push({
+                    pathname: '/(ride)/chat',
+                    params: { bookingId: String(bookingId), driverName: matchedDriver?.fullName ?? 'Tài xế' }
+                  })}
+                >
+                  <MessageSquare size={16} color="#FFF" style={{ marginRight: 6 }} />
+                  <Text style={styles.actionBtnText}>Chat</Text>
+                </TouchableOpacity>
+
+                <TouchableOpacity
+                  style={styles.callActionBtn}
+                  onPress={() => {
+                    Alert.alert('Gọi tài xế', `Đang kết nối đến ${matchedDriver?.fullName ?? 'tài xế'} qua số ${matchedDriver?.phoneNumber ?? 'N/A'}...`);
+                  }}
+                >
+                  <Text style={styles.callBtnText}>Gọi điện</Text>
+                </TouchableOpacity>
+              </View>
+            </View>
           )}
 
           {/* ── Route summary ──────────────────────────────── */}
@@ -622,4 +672,83 @@ const styles = StyleSheet.create({
   vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   vnpayCancelButton: { paddingVertical: 8 },
   vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
+  driverCard: {
+    padding: 16,
+    backgroundColor: '#F9FAFB',
+    borderRadius: 16,
+    marginBottom: 16,
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+  },
+  driverInfoRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    marginBottom: 12,
+  },
+  driverAvatar: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#6366F1',
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  driverAvatarText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 14,
+  },
+  driverDetails: {
+    flex: 1,
+    marginLeft: 12,
+  },
+  driverName: {
+    fontSize: 15,
+    fontWeight: 'bold',
+    color: '#1F2937',
+  },
+  driverVehicle: {
+    fontSize: 12,
+    color: '#6B7280',
+    marginTop: 2,
+  },
+  driverRating: {
+    fontSize: 12,
+    color: '#D97706',
+    fontWeight: '600',
+    marginTop: 2,
+  },
+  driverActions: {
+    flexDirection: 'row',
+    gap: 10,
+  },
+  chatActionBtn: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#6366F1',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  callActionBtn: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#FFF',
+    borderWidth: 1,
+    borderColor: '#E5E7EB',
+    paddingVertical: 10,
+    borderRadius: 10,
+  },
+  actionBtnText: {
+    color: '#FFF',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
+  callBtnText: {
+    color: '#374151',
+    fontWeight: 'bold',
+    fontSize: 13,
+  },
 });
