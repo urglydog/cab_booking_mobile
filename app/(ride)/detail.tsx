@@ -29,6 +29,7 @@ export default function RideDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [matchedDriver, setMatchedDriver] = useState<any>(null);
 
   // Review states
   const [rating, setRating] = useState(5);
@@ -192,6 +193,21 @@ export default function RideDetailScreen() {
     return () => clearInterval(interval);
   }, [bookingId, booking?.status]);
 
+  useEffect(() => {
+    const driverId = booking?.assignedDriverId;
+    if (driverId) {
+      api.get(`/api/drivers/${driverId}/profile`)
+        .then(res => {
+          if (res.data?.result) {
+            setMatchedDriver(res.data.result);
+          }
+        })
+        .catch(err => console.log('Failed to fetch matched driver profile in detail:', err));
+    } else {
+      setMatchedDriver(null);
+    }
+  }, [booking?.assignedDriverId]);
+
   const getStatusInVietnamese = (status: string) => {
     switch (status) {
       case 'COMPLETED': return 'Đã hoàn thành';
@@ -317,7 +333,7 @@ export default function RideDetailScreen() {
       Alert.alert('Thành công', 'Cảm ơn bạn đã gửi đánh giá cho tài xế!');
     } catch (error) {
       console.log('Failed to submit review to MongoDB:', error);
-      
+
       // Fallback/Demo success - save locally so it NEVER vanishes on exit!
       try {
         await AsyncStorage.setItem(`local_review_${bookingId}`, JSON.stringify({
@@ -511,17 +527,27 @@ export default function RideDetailScreen() {
           <View style={styles.driverRow}>
             <View style={styles.avatarWrapper}>
               <Text style={styles.avatarText}>
-                {(booking.assignedDriverId || booking.status === 'CANCELLED') ? 'TX' : '?'}
+                {booking.assignedDriverId ? 'TX' : '?'}
               </Text>
             </View>
             <View style={styles.driverInfoWrapper}>
-              {(booking.assignedDriverId || booking.status === 'CANCELLED') ? (
+              {booking.assignedDriverId ? (
                 <>
-                  <Text style={styles.driverName}>Tài xế Nguyễn Chí Thiện</Text>
-                  <Text style={styles.driverSubText}>Mã số: TX-{(booking.assignedDriverId || '04c0a5c2').substring(0, 8).toUpperCase()}</Text>
+                  <Text style={styles.driverName}>
+                    {matchedDriver ? matchedDriver.fullName : 'Đang tải thông tin...'}
+                  </Text>
+                  <Text style={styles.driverSubText}>
+                    {matchedDriver
+                      ? `Biển số: ${matchedDriver.vehiclePlate ?? 'N/A'} • ${matchedDriver.vehicleColor ?? 'N/A'} • ${matchedDriver.vehicleModel ?? 'N/A'}`
+                      : `Mã số: TX-${booking.assignedDriverId.substring(0, 8).toUpperCase()}`}
+                  </Text>
                   <View style={styles.driverRatingRow}>
-                    <Text style={styles.driverRatingText}>4.9 ⭐</Text>
-                    <Text style={styles.driverTripsText}>(320 chuyến đi)</Text>
+                    <Text style={styles.driverRatingText}>
+                      ⭐ {matchedDriver?.averageRating ? Number(matchedDriver.averageRating).toFixed(1) : '5.0'}
+                    </Text>
+                    <Text style={styles.driverTripsText}>
+                      ({matchedDriver?.totalCompletedRides ?? 0} chuyến đi)
+                    </Text>
                   </View>
                 </>
               ) : (
@@ -713,6 +739,37 @@ export default function RideDetailScreen() {
               </View>
             )}
           </View>
+        )}
+
+        {/* 6.5. Cancel Active Ride Section */}
+        {['MATCHING', 'CREATED', 'PENDING', 'PENDING_PAYMENT', 'ASSIGNED', 'ACCEPTED', 'ARRIVING'].includes(String(booking.status).toUpperCase()) && (
+          <TouchableOpacity
+            style={styles.cancelActiveButton}
+            onPress={() => {
+              Alert.alert(
+                'Xác nhận hủy',
+                'Bạn có chắc chắn muốn hủy chuyến xe này không?',
+                [
+                  { text: 'Quay lại', style: 'cancel' },
+                  {
+                    text: 'Hủy chuyến',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await api.post(`/api/v1/bookings/${bookingId}/cancel`);
+                        Alert.alert('Thành công', 'Đã hủy chuyến đi thành công.');
+                        router.replace('/(tabs)/explore');
+                      } catch (err) {
+                        Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+          >
+            <Text style={styles.cancelActiveButtonText}>Hủy Chuyến</Text>
+          </TouchableOpacity>
         )}
 
         {/* 7. Metadata Section */}

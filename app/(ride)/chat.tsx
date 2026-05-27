@@ -22,6 +22,7 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [realDriverName, setRealDriverName] = useState<string>('');
   const flatListRef = useRef<FlatList>(null);
   const roomId = String(bookingId ?? '');
 
@@ -87,6 +88,19 @@ export default function ChatScreen() {
         const response = await api.get(`/api/v1/bookings/${roomId}`);
         if (response.data && response.data.result) {
           const bookingData = response.data.result;
+          
+          const drvId = bookingData.assignedDriverId || bookingData.driverId;
+          if (drvId) {
+            try {
+              const driverProfileRes = await api.get(`/api/drivers/${drvId}/profile`);
+              if (driverProfileRes.data?.result?.fullName) {
+                setRealDriverName(driverProfileRes.data.result.fullName);
+              }
+            } catch (err) {
+              console.log('Failed to fetch driver profile in chat screen:', err);
+            }
+          }
+
           if (bookingData.status === 'COMPLETED' || bookingData.status === 'CANCELLED') {
             setIsCompleted(true);
             setMessages([
@@ -211,7 +225,7 @@ export default function ChatScreen() {
           <ChevronLeft size={24} color="#333" />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{driverName || 'Tài xế Nguyễn Chí Thiện'}</Text>
+          <Text style={styles.headerTitle}>{realDriverName || driverName || 'Tài xế'}</Text>
           <View style={styles.statusIndicator}>
             <View style={styles.onlineDot} />
             <Text style={styles.onlineText}>Đang trực tuyến</Text>
