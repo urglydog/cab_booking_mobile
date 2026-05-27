@@ -597,6 +597,40 @@ export default function BookingScreen() {
           return;
         }
         Alert.alert('Trùng lặp', 'Yêu cầu đặt xe này đã được xử lý. Vui lòng thử tuyến khác.');
+      } else if (
+        (error?.response?.status === 422 && error?.response?.data?.errorMessage === 'PASSENGER_HAS_ACTIVE_RIDE') ||
+        (error?.response?.data?.code === 422 && error?.response?.data?.errorMessage === 'PASSENGER_HAS_ACTIVE_RIDE') ||
+        error?.response?.data?.errorCode === 'PASSENGER_HAS_ACTIVE_RIDE'
+      ) {
+        // Show notification then redirect to the existing active ride
+        Alert.alert(
+          'Chuyến đi đang hoạt động',
+          'Bạn đang có một chuyến đi chưa hoàn thành. Hệ thống sẽ đưa bạn đến trang theo dõi chuyến đi.',
+          [
+            {
+              text: 'Đồng ý',
+              onPress: async () => {
+                try {
+                  const customerId = await AsyncStorage.getItem('user_id');
+                  if (customerId) {
+                    const activeBookingRes = await api.get(`/api/v1/bookings/customer/${customerId}/active`);
+                    const activeBookingId = activeBookingRes.data?.result?.id || activeBookingRes.data?.id;
+                    if (activeBookingId) {
+                      router.replace({
+                        pathname: '/(ride)/matching',
+                        params: { bookingId: activeBookingId },
+                      });
+                      return;
+                    }
+                  }
+                } catch (activeErr) {
+                  console.error('Failed to redirect to active booking:', activeErr);
+                }
+                router.replace('/(tabs)/explore');
+              }
+            }
+          ]
+        );
       } else if (error?.response?.status === 422 && error?.response?.data?.errorMessage === 'INVALID_QUOTE_STATUS') {
         clearStaleEstimate();
         Alert.alert('Giá không còn hợp lệ', 'Báo giá này đã hết hiệu lực hoặc đã được sử dụng cho giao dịch trước. Vui lòng chọn lại lộ trình để lấy báo giá mới.');
