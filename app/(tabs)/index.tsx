@@ -362,7 +362,15 @@ export default function HomeScreen() {
             <View style={styles.notificationCard}>
               <Bell size={20} color={Colors.light.primary} />
               <Text style={styles.notificationText}>
-                {latestNotification}
+                {isActive ? (
+                  latestBooking.status === 'MATCHING' ? 'Đang tìm tài xế gần nhất cho bạn...' :
+                  latestBooking.status === 'ASSIGNED' || latestBooking.status === 'ACCEPTED' ? `Tài xế ${matchedDriver?.fullName ?? 'đã nhận chuyến'} đang chuẩn bị đón bạn.` :
+                  latestBooking.status === 'ARRIVING' ? `Tài xế ${matchedDriver?.fullName ?? ''} đã đến điểm đón.` :
+                  latestBooking.status === 'STARTED' || latestBooking.status === 'IN_PROGRESS' ? 'Chuyến đi của bạn đang diễn ra.' :
+                  'Đang cập nhật trạng thái chuyến đi...'
+                ) : (
+                  latestNotification
+                )}
               </Text>
             </View>
           </View>
@@ -425,7 +433,12 @@ export default function HomeScreen() {
         {isActive && (
           <TouchableOpacity
             style={styles.floatingTrackerCard}
-            onPress={() => setShowTrackingModal(true)}
+            onPress={() => {
+              router.push({
+                pathname: '/(ride)/matching',
+                params: { bookingId: latestBooking.id },
+              });
+            }}
             activeOpacity={0.9}
           >
             <View style={styles.trackerHeader}>
@@ -568,6 +581,33 @@ export default function HomeScreen() {
                     </View>
                   )}
                 </View>
+
+                {/* View on Map Button */}
+                <TouchableOpacity
+                  style={{
+                    backgroundColor: Colors.light.primary,
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    marginTop: 20,
+                    shadowColor: Colors.light.primary,
+                    shadowOffset: { width: 0, height: 4 },
+                    shadowOpacity: 0.2,
+                    shadowRadius: 6,
+                  }}
+                  onPress={() => {
+                    setShowTrackingModal(false);
+                    router.push({
+                      pathname: '/(ride)/matching',
+                      params: { bookingId: latestBooking.id },
+                    });
+                  }}
+                >
+                  <Text style={{ color: '#FFF', fontSize: 15, fontWeight: '800' }}>
+                    Theo dõi trên bản đồ
+                  </Text>
+                </TouchableOpacity>
 
                 {/* Cancel Button (Visible if MATCHING/FINDING) */}
                 {latestBooking.status === 'MATCHING' && (

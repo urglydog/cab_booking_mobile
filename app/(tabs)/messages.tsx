@@ -11,6 +11,7 @@ export default function MessagesScreen() {
   const router = useRouter();
   const [bookings, setBookings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [driverNames, setDriverNames] = useState<Record<string, string>>({});
 
   const fetchBookings = async () => {
     try {
@@ -27,6 +28,24 @@ export default function MessagesScreen() {
           b.status !== 'CANCELLED' && b.status !== 'MATCHING'
         );
         setBookings(eligibleBookings);
+
+        // Fetch driver profiles asynchronously
+        eligibleBookings.forEach(async (b: any) => {
+          const drvId = b.assignedDriverId || b.driverId;
+          if (drvId && !driverNames[drvId]) {
+            try {
+              const res = await api.get(`/api/drivers/${drvId}/profile`);
+              if (res.data?.result?.fullName) {
+                setDriverNames(prev => ({
+                  ...prev,
+                  [drvId]: res.data.result.fullName
+                }));
+              }
+            } catch (err) {
+              console.log('Failed to fetch driver profile in messages tab:', err);
+            }
+          }
+        });
       }
     } catch (error) {
       console.log('Failed to fetch bookings in messages tab:', error);
@@ -38,7 +57,7 @@ export default function MessagesScreen() {
   useFocusEffect(
     React.useCallback(() => {
       fetchBookings();
-    }, [])
+    }, [driverNames])
   );
 
   const getChatSubtitle = (item: any) => {
@@ -55,8 +74,12 @@ export default function MessagesScreen() {
   };
 
   const getDriverName = (item: any) => {
-    if (item.assignedDriverId) {
-      return 'Tài xế Nguyễn Chí Thiện';
+    const drvId = item.assignedDriverId || item.driverId;
+    if (drvId && driverNames[drvId]) {
+      return `Tài xế ${driverNames[drvId]}`;
+    }
+    if (drvId) {
+      return 'Tài xế';
     }
     return `Chuyến xe #${item.id.substring(0, 8).toUpperCase()}`;
   };
