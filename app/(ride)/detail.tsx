@@ -31,6 +31,7 @@ export default function RideDetailScreen() {
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [driverInfo, setDriverInfo] = useState<DriverDisplayInfo | null>(null);
+  const [matchedDriver, setMatchedDriver] = useState<any>(null);
 
   // Review states
   const [rating, setRating] = useState(5);
@@ -170,11 +171,13 @@ export default function RideDetailScreen() {
 
     if (socket) {
       socket.on('new_notification', refreshBookingDetail);
+      socket.on('booking_status_update', refreshBookingDetail);
     }
 
     return () => {
       if (socket) {
         socket.off('new_notification', refreshBookingDetail);
+        socket.off('booking_status_update', refreshBookingDetail);
       }
     };
   }, [socket, bookingId]);
@@ -193,6 +196,21 @@ export default function RideDetailScreen() {
 
     return () => clearInterval(interval);
   }, [bookingId, booking?.status]);
+
+  useEffect(() => {
+    const driverId = booking?.assignedDriverId;
+    if (driverId) {
+      api.get(`/api/drivers/${driverId}/profile`)
+        .then(res => {
+          if (res.data?.result) {
+            setMatchedDriver(res.data.result);
+          }
+        })
+        .catch(err => console.log('Failed to fetch matched driver profile in detail:', err));
+    } else {
+      setMatchedDriver(null);
+    }
+  }, [booking?.assignedDriverId]);
 
   const getStatusInVietnamese = (status: string) => {
     switch (status) {
@@ -321,7 +339,7 @@ export default function RideDetailScreen() {
       Alert.alert('Thành công', 'Cảm ơn bạn đã gửi đánh giá cho tài xế!');
     } catch (error) {
       console.log('Failed to submit review to MongoDB:', error);
-      
+
       // Fallback/Demo success - save locally so it NEVER vanishes on exit!
       try {
         await AsyncStorage.setItem(`local_review_${bookingId}`, JSON.stringify({
@@ -515,32 +533,50 @@ export default function RideDetailScreen() {
           <View style={styles.driverRow}>
             <View style={styles.avatarWrapper}>
               <Text style={styles.avatarText}>
-                {driverInfo?.hasDriver ? 'TX' : '?'}
+                {booking.assignedDriverId || driverInfo?.hasDriver ? 'TX' : '?'}
               </Text>
             </View>
             <View style={styles.driverInfoWrapper}>
-              {driverInfo?.hasDriver ? (
+              {booking.assignedDriverId || driverInfo?.hasDriver ? (
                 <>
                   <Text style={styles.driverName}>
-                    {driverInfo.fullName || 'Tài xế đã nhận chuyến'}
+                    {matchedDriver?.fullName || driverInfo?.fullName || 'Tài xế đã nhận chuyến'}
                   </Text>
-                  {driverInfo.shortId && (
-                    <Text style={styles.driverSubText}>Mã số: {driverInfo.shortId}</Text>
-                  )}
-                  {/* Only show rating if backend provides it */}
-                  {driverInfo.averageRating != null && driverInfo.totalCompletedRides != null && (
-                    <View style={styles.driverRatingRow}>
-                      <Text style={styles.driverRatingText}>{driverInfo.averageRating.toFixed(1)} ⭐</Text>
-                      <Text style={styles.driverTripsText}>({driverInfo.totalCompletedRides} chuyến đi)</Text>
-                    </View>
-                  )}
-                  {/* Only show vehicle info if backend provides it */}
-                  {driverInfo.vehiclePlate && (
-                    <Text style={styles.driverSubText}>
-                      Biển số: {driverInfo.vehiclePlate}
-                      {driverInfo.vehicleColor ? ` • ${driverInfo.vehicleColor}` : ''}
-                      {driverInfo.vehicleModel ? ` • ${driverInfo.vehicleModel}` : ''}
-                    </Text>
+                  {matchedDriver ? (
+                    <>
+                      <Text style={styles.driverSubText}>
+                        Biển số: {matchedDriver.vehiclePlate ?? 'N/A'}
+                        {matchedDriver.vehicleColor ? ` • ${matchedDriver.vehicleColor}` : ''}
+                        {matchedDriver.vehicleModel ? ` • ${matchedDriver.vehicleModel}` : ''}
+                      </Text>
+                      <View style={styles.driverRatingRow}>
+                        <Text style={styles.driverRatingText}>
+                          ⭐ {matchedDriver.averageRating ? Number(matchedDriver.averageRating).toFixed(1) : '5.0'}
+                        </Text>
+                        <Text style={styles.driverTripsText}>
+                          ({matchedDriver.totalCompletedRides ?? 0} chuyến đi)
+                        </Text>
+                      </View>
+                    </>
+                  ) : (
+                    <>
+                      {driverInfo?.shortId && (
+                        <Text style={styles.driverSubText}>Mã số: {driverInfo.shortId}</Text>
+                      )}
+                      {driverInfo?.averageRating != null && driverInfo.totalCompletedRides != null && (
+                        <View style={styles.driverRatingRow}>
+                          <Text style={styles.driverRatingText}>{driverInfo.averageRating.toFixed(1)} ⭐</Text>
+                          <Text style={styles.driverTripsText}>({driverInfo.totalCompletedRides} chuyến đi)</Text>
+                        </View>
+                      )}
+                      {driverInfo?.vehiclePlate && (
+                        <Text style={styles.driverSubText}>
+                          Biển số: {driverInfo.vehiclePlate}
+                          {driverInfo.vehicleColor ? ` • ${driverInfo.vehicleColor}` : ''}
+                          {driverInfo.vehicleModel ? ` • ${driverInfo.vehicleModel}` : ''}
+                        </Text>
+                      )}
+                    </>
                   )}
                 </>
               ) : (
@@ -732,6 +768,37 @@ export default function RideDetailScreen() {
               </View>
             )}
           </View>
+        )}
+
+        {/* 6.5. Cancel Active Ride Section */}
+        {['MATCHING', 'CREATED', 'PENDING', 'PENDING_PAYMENT', 'ASSIGNED', 'ACCEPTED', 'ARRIVING'].includes(String(booking.status).toUpperCase()) && (
+          <TouchableOpacity
+            style={styles.cancelActiveButton}
+            onPress={() => {
+              Alert.alert(
+                'Xác nhận hủy',
+                'Bạn có chắc chắn muốn hủy chuyến xe này không?',
+                [
+                  { text: 'Quay lại', style: 'cancel' },
+                  {
+                    text: 'Hủy chuyến',
+                    style: 'destructive',
+                    onPress: async () => {
+                      try {
+                        await api.post(`/api/v1/bookings/${bookingId}/cancel`);
+                        Alert.alert('Thành công', 'Đã hủy chuyến đi thành công.');
+                        router.replace('/(tabs)/explore');
+                      } catch (err) {
+                        Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                      }
+                    }
+                  }
+                ]
+              );
+            }}
+          >
+            <Text style={styles.cancelActiveButtonText}>Hủy Chuyến</Text>
+          </TouchableOpacity>
         )}
 
         {/* 7. Metadata Section */}

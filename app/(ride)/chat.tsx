@@ -22,6 +22,7 @@ export default function ChatScreen() {
   const [inputText, setInputText] = useState('');
   const [loading, setLoading] = useState(true);
   const [isCompleted, setIsCompleted] = useState(false);
+  const [realDriverName, setRealDriverName] = useState<string>('');
   const flatListRef = useRef<FlatList>(null);
   const roomId = String(bookingId ?? '');
 
@@ -51,34 +52,10 @@ export default function ChatScreen() {
     };
 
     const fetchBookingStatusAndInit = async () => {
+      // Mock bookings → just mark completed
       if (roomId.startsWith('booking-mock')) {
         setIsCompleted(true);
-        setMessages([
-          {
-            id: 'hist-1',
-            sender: 'DRIVER',
-            message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
-            timestamp: Date.now() - 300000,
-          },
-          {
-            id: 'hist-2',
-            sender: 'CUSTOMER',
-            message: 'Vâng, tôi đang đi xuống sảnh đây ạ.',
-            timestamp: Date.now() - 240000,
-          },
-          {
-            id: 'hist-3',
-            sender: 'DRIVER',
-            message: 'Tôi đang đứng ngay cổng chính, xe màu đỏ nhé.',
-            timestamp: Date.now() - 180000,
-          },
-          {
-            id: 'hist-4',
-            sender: 'CUSTOMER',
-            message: 'Dạ vâng tôi thấy xe rồi ạ.',
-            timestamp: Date.now() - 120000,
-          }
-        ]);
+        setMessages([]);
         setLoading(false);
         return;
       }
@@ -87,34 +64,22 @@ export default function ChatScreen() {
         const response = await api.get(`/api/v1/bookings/${roomId}`);
         if (response.data && response.data.result) {
           const bookingData = response.data.result;
+          
+          const drvId = bookingData.assignedDriverId || bookingData.driverId;
+          if (drvId) {
+            try {
+              const driverProfileRes = await api.get(`/api/drivers/${drvId}/profile`);
+              if (driverProfileRes.data?.result?.fullName) {
+                setRealDriverName(driverProfileRes.data.result.fullName);
+              }
+            } catch (err) {
+              console.log('Failed to fetch driver profile in chat screen:', err);
+            }
+          }
+
           if (bookingData.status === 'COMPLETED' || bookingData.status === 'CANCELLED') {
             setIsCompleted(true);
-            setMessages([
-              {
-                id: 'hist-1',
-                sender: 'DRIVER',
-                message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
-                timestamp: Date.now() - 300000,
-              },
-              {
-                id: 'hist-2',
-                sender: 'CUSTOMER',
-                message: 'Vâng, tôi đang đi xuống sảnh đây ạ.',
-                timestamp: Date.now() - 240000,
-              },
-              {
-                id: 'hist-3',
-                sender: 'DRIVER',
-                message: 'Tôi đang đứng ngay cổng chính, xe màu đỏ nhé.',
-                timestamp: Date.now() - 180000,
-              },
-              {
-                id: 'hist-4',
-                sender: 'CUSTOMER',
-                message: 'Dạ vâng tôi thấy xe rồi ạ.',
-                timestamp: Date.now() - 120000,
-              }
-            ]);
+            setMessages([]);  // No hardcoded messages — real chat history would come from a persistence layer
             setLoading(false);
             return;
           }
@@ -123,15 +88,8 @@ export default function ChatScreen() {
         console.log('Failed to fetch booking status in chat:', err);
       }
 
-      // Live mode fallback:
-      setMessages([
-        {
-          id: 'welcome-1',
-          sender: 'DRIVER',
-          message: 'Xin chào, tôi là tài xế của bạn. Tôi đang di chuyển đến điểm đón!',
-          timestamp: Date.now() - 60000,
-        }
-      ]);
+      // Live chat mode — start with empty messages, real messages come through SocketIO
+      setMessages([]);
       setLoading(false);
 
       if (socket) {
@@ -211,7 +169,7 @@ export default function ChatScreen() {
           <ChevronLeft size={24} color="#333" />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{driverName || 'Tài xế'}</Text>
+          <Text style={styles.headerTitle}>{realDriverName || driverName || 'Tài xế'}</Text>
           <View style={styles.statusIndicator}>
             <View style={styles.onlineDot} />
             <Text style={styles.onlineText}>Đang trực tuyến</Text>

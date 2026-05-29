@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert,
+  StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Animated, Easing,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock, MessageSquare } from 'lucide-react-native';
@@ -29,30 +29,53 @@ const BOOKING_STATUS_SET = new Set([
   'ACCEPTED', 'PICKUP', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED',
 ]);
 
-/**
- * Map backend BookingStatus enum to internal UI status.
- * Only accepts valid BookingStatus values — no Vietnamese text parsing.
- * For notification payloads (which lack booking status), returns undefined
- * and lets the 5s polling interval handle the status update.
- */
 const inferRideUiStatus = (payload: any) => {
-  const rawStatus = String(payload?.status ?? '').toUpperCase();
+  const rawStatus = String(
+    payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? ''
+  ).toUpperCase();
+  const title = String(payload?.title ?? '').toLowerCase();
+  const message = String(payload?.message ?? '').toLowerCase();
 
-  // Only process if status is a valid BookingStatus enum value
-  if (!BOOKING_STATUS_SET.has(rawStatus)) return undefined;
-
-  switch (rawStatus) {
-    case 'CREATED':
-    case 'MATCHING':      return 'FINDING';
-    case 'PENDING_PAYMENT': return 'PENDING_PAYMENT';
-    case 'ASSIGNED':      return 'FOUND';
-    case 'ACCEPTED':
-    case 'PICKUP':        return 'ARRIVING';
-    case 'IN_PROGRESS':   return 'STARTED';
-    case 'COMPLETED':     return 'COMPLETED';
-    case 'CANCELLED':     return 'CANCELLED';
-    default:              return undefined;
+  if (BOOKING_STATUS_SET.has(rawStatus)) {
+    switch (rawStatus) {
+      case 'CREATED':
+      case 'MATCHING':
+        return 'FINDING';
+      case 'PENDING_PAYMENT':
+        return 'PENDING_PAYMENT';
+      case 'ASSIGNED':
+        return 'PENDING_DRIVER';
+      case 'ACCEPTED':
+        return 'FOUND';
+      case 'PICKUP':
+        return 'ARRIVING';
+      case 'IN_PROGRESS':
+        return 'STARTED';
+      case 'COMPLETED':
+        return 'COMPLETED';
+      case 'CANCELLED':
+        return 'CANCELLED';
+      default:
+        return undefined;
+    }
   }
+
+  if (rawStatus === 'PAID') return 'PAID';
+  if (['TIMEOUT', 'BOOKING.TIMEOUT'].includes(rawStatus)) return 'CANCELLED';
+  if (title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
+  if (title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
+  if (title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
+  if (title.includes('hủy') || message.includes('không tìm thấy tài xế') || title.includes('hết thời gian')) return 'CANCELLED';
+  if (
+    ['REJECTED', 'RIDE.REJECTED', 'RIDE_REJECTED'].includes(rawStatus) ||
+    message.includes('tìm tài xế') ||
+    message.includes('từ chối') ||
+    message.includes('reject')
+  ) {
+    return 'FINDING';
+  }
+
+  return undefined;
 };
 
 // Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
@@ -77,7 +100,7 @@ const generateRouteCoords = (
 
     // Multi-frequency wave using sine to create an elegant curved S-route (sin curve)
     const wave = Math.sin(ratio * Math.PI * 2);
-    
+
     // Perpendicular offset scaled to 24% of the distance to give a beautiful natural curve
     const offsetScale = 0.24;
     const latOffset = perpLat * wave * offsetScale;
@@ -112,7 +135,7 @@ export default function MatchingScreen() {
 
   const { socket } = useSocket();
   const { initPayment, startPolling, stopPolling } = usePayment();
-  const { isConnected: isRideConnected, driverLocation } = useRideSocket(bookingId);
+  const { driverLocation } = useRideSocket(bookingId);
 
   // If prepaid method, start in PENDING_PAYMENT to avoid fake "finding driver" flash
   const [bookingStatus, setBookingStatus] = useState<string>(
@@ -122,6 +145,50 @@ export default function MatchingScreen() {
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [matchedDriver, setMatchedDriver] = useState<any>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
+  const [statusSubtext, setStatusSubtext] = useState<string>('Hệ thống đang kết nối bạn với tài xế gần nhất');
+
+  const pulse = useRef(new Animated.Value(0)).current;
+  const sweep = useRef(new Animated.Value(0)).current;
+
+  const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED' || bookingStatus === 'PENDING_DRIVER';
+
+  useEffect(() => {
+    if (!isFinding) {
+      pulse.stopAnimation();
+      sweep.stopAnimation();
+      pulse.setValue(0);
+      sweep.setValue(0);
+      return;
+    }
+
+    const pulseLoop = Animated.loop(
+      Animated.timing(pulse, {
+        toValue: 1,
+        duration: 1700,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      })
+    );
+    const sweepLoop = Animated.loop(
+      Animated.timing(sweep, {
+        toValue: 1,
+        duration: 2200,
+        easing: Easing.linear,
+        useNativeDriver: false,
+      })
+    );
+    pulseLoop.start();
+    sweepLoop.start();
+
+    return () => {
+      pulseLoop.stop();
+      sweepLoop.stop();
+    };
+  }, [isFinding, pulse, sweep]);
+
+  const pulseScale = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.4, 2.6] });
+  const pulseOpacity = pulse.interpolate({ inputRange: [0, 1], outputRange: [0.35, 0] });
+  const sweepRotation = sweep.interpolate({ inputRange: [0, 1], outputRange: ['0deg', '360deg'] });
 
   useEffect(() => {
     const driverId = bookingInfo?.assignedDriverId ?? bookingInfo?.driverId;
@@ -161,16 +228,19 @@ export default function MatchingScreen() {
   };
 
   // ── Parsed estimate data ────────────────────────────────────
-  const parsedFare    = parseFloat(estimatedFare ?? '0');
-  const parsedSurge  = parseFloat(surge ?? '1.0');
-  const parsedVehicleType = vehicleType ?? 'CAR';
+  const parsedFare = parseFloat(estimatedFare ?? bookingInfo?.estimatedFare?.toString() ?? '0');
+  const parsedSurge = parseFloat(surge ?? '1.0');
+  const parsedVehicleType = vehicleType ?? bookingInfo?.vehicleType ?? 'CAR';
 
-  const pLat = parseFloat(pickupLat ?? '0');
-  const pLng = parseFloat(pickupLng ?? '0');
-  const dLat = parseFloat(dropoffLat ?? '0');
-  const dLng = parseFloat(dropoffLng ?? '0');
+  const pLat = parseFloat(pickupLat ?? bookingInfo?.pickupCoordinates?.lat?.toString() ?? '0');
+  const pLng = parseFloat(pickupLng ?? bookingInfo?.pickupCoordinates?.lng?.toString() ?? '0');
+  const dLat = parseFloat(dropoffLat ?? bookingInfo?.dropoffCoordinates?.lat?.toString() ?? '0');
+  const dLng = parseFloat(dropoffLng ?? bookingInfo?.dropoffCoordinates?.lng?.toString() ?? '0');
 
   const hasValidCoords = pLat !== 0 && dLat !== 0;
+
+  const pickupText = pickup ?? bookingInfo?.pickupLocation;
+  const dropoffText = dropoff ?? bookingInfo?.dropoffLocation;
 
   // Route polyline coordinates (beautiful curved S-route between pickup and dropoff)
   const routeCoordinates = hasValidCoords
@@ -180,43 +250,56 @@ export default function MatchingScreen() {
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
 
+  const fetchBookingInfo = async () => {
+    if (!bookingId) return;
+    try {
+      const response = await api.get(`/api/v1/bookings/${bookingId}`);
+      if (response.data?.result) {
+        const booking = response.data.result;
+        setBookingInfo(booking);
+
+        const inferredStatus = inferRideUiStatus(booking);
+        if (inferredStatus === 'COMPLETED') {
+          handleRideCompleted(booking);
+          return;
+        } else if (inferredStatus === 'CANCELLED' || inferredStatus === 'PAID') {
+          router.replace('/(tabs)/explore');
+          return;
+        } else if (inferredStatus) {
+          setBookingStatus(inferredStatus);
+          if (inferredStatus === 'FINDING') {
+            setStatusSubtext(prev => prev.includes('từ chối') || prev.includes('hủy') || prev.includes('chưa kịp') ? prev : 'Hệ thống đang kết nối bạn với tài xế gần nhất');
+          } else if (inferredStatus === 'PENDING_DRIVER') {
+            setStatusSubtext('Đã tìm thấy tài xế! Đang chờ tài xế xác nhận chuyến...');
+          } else if (inferredStatus === 'FOUND') {
+            setStatusSubtext('Tài xế đã nhận chuyến. Tài xế đang đến điểm đón của bạn.');
+          } else if (inferredStatus === 'ARRIVING') {
+            setStatusSubtext('Tài xế đang đến điểm đón của bạn.');
+          } else if (inferredStatus === 'STARTED') {
+            setStatusSubtext('Chuyến đi đã bắt đầu.');
+          }
+        } else if (booking.status === 'PENDING_PAYMENT') {
+          // VNPay: booking waits for online payment before matching starts
+          setBookingStatus('PENDING_PAYMENT');
+        } else if (booking.status) {
+          setBookingStatus(booking.status);
+        }
+      }
+    } catch (err: any) {
+      if (err?.response?.status !== 404) {
+        console.log('Could not fetch booking info:', err?.message);
+      }
+    }
+  };
+
   // ── Derived UI flags (must be declared before useEffects that reference them) ──
-  const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
+  const isActivelySearching = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
   const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
-  const isCancelled = bookingStatus === 'CANCELLED';
   const isSurge = parsedSurge > 1.0;
 
   // ── Poll booking status ──────────────────────────────────────
   useEffect(() => {
     if (!bookingId) return;
-
-    const fetchBookingInfo = async () => {
-      try {
-        const response = await api.get(`/api/v1/bookings/${bookingId}`);
-        if (response.data?.result) {
-          const booking = response.data.result;
-          setBookingInfo(booking);
-
-          const inferredStatus = inferRideUiStatus(booking);
-          if (inferredStatus === 'COMPLETED') {
-            handleRideCompleted({ ...bookingInfo, ...booking });
-            return;
-          } else if (inferredStatus === 'CANCELLED') {
-            setBookingStatus('CANCELLED');
-            return;
-          } else if (inferredStatus) {
-            setBookingStatus(inferredStatus);
-          } else if (booking.status) {
-            // Fallback: use raw BookingStatus if inferRideUiStatus didn't map it
-            setBookingStatus(booking.status);
-          }
-        }
-      } catch (err: any) {
-        if (err?.response?.status !== 404) {
-          console.log('Could not fetch booking info:', err?.message);
-        }
-      }
-    };
 
     fetchBookingInfo();
     const interval = setInterval(fetchBookingInfo, 5000);
@@ -232,11 +315,11 @@ export default function MatchingScreen() {
 
   // ── Elapsed timer for FINDING/CREATED status ──────────────────
   useEffect(() => {
-    if (!isFinding) return;
+    if (!isActivelySearching) return;
     setElapsedSeconds(0);
     const timer = setInterval(() => setElapsedSeconds(prev => prev + 1), 1000);
     return () => clearInterval(timer);
-  }, [isFinding]);
+  }, [isActivelySearching]);
 
   useEffect(() => {
     if (!socket) return;
@@ -249,38 +332,59 @@ export default function MatchingScreen() {
     const handleNotification = (data: any) => {
       if (!isRoomUpdateForBooking(data, bookingId as string)) return;
 
-      // Re-fetch booking to get actual BookingStatus
       api.get(`/api/v1/bookings/${bookingId}`)
         .then(res => {
           if (!res.data?.result) return;
           const freshBooking = res.data.result;
           setBookingInfo(freshBooking);
 
-          const inferredStatus = inferRideUiStatus(freshBooking);
+          const inferredStatus = inferRideUiStatus(freshBooking) ?? inferRideUiStatus(data);
           if (inferredStatus === 'COMPLETED') {
             setBookingStatus('COMPLETED');
-            handleRideCompleted({ ...bookingInfo, ...freshBooking });
+            handleRideCompleted(freshBooking);
+          } else if (inferredStatus === 'PAID') {
+            setBookingStatus('PAID');
+            router.replace('/(tabs)/explore');
           } else if (inferredStatus === 'CANCELLED') {
             setBookingStatus('CANCELLED');
+            if (data.message) {
+              Alert.alert('Thông báo', data.message);
+            }
+          } else if (inferredStatus === 'FINDING') {
+            setBookingStatus('FINDING');
+            const msg = String(data?.message ?? '');
+            setStatusSubtext(msg || 'Tài xế chưa kịp nhận chuyến. Đang tìm tài xế khác cho bạn...');
+            setMatchedDriver(null);
           } else if (inferredStatus) {
             setBookingStatus(inferredStatus);
+            if (inferredStatus === 'PENDING_DRIVER') {
+              setStatusSubtext(data.message || 'Đã tìm thấy tài xế! Đang chờ tài xế xác nhận chuyến...');
+            } else if (inferredStatus === 'FOUND') {
+              setStatusSubtext(data.message || 'Tài xế đã nhận chuyến. Tài xế đang đến điểm đón của bạn.');
+            } else if (inferredStatus === 'ARRIVING') {
+              setStatusSubtext(data.message || 'Tài xế đang đến điểm đón của bạn.');
+            } else if (inferredStatus === 'STARTED') {
+              setStatusSubtext(data.message || 'Chuyến đi đã bắt đầu.');
+            }
           }
         })
         .catch(() => {});
     };
 
     socket.on('new_notification', handleNotification);
+    socket.on('booking_status_update', handleNotification);
     return () => {
       socket.off('new_notification', handleNotification);
+      socket.off('booking_status_update', handleNotification);
     };
-  }, [socket, bookingId, bookingInfo]);
+  }, [socket, bookingId, router]);
 
   // ── Payment flow ─────────────────────────────────────────────
   const handleRideCompleted = async (info?: any) => {
     const booking = info ?? bookingInfo;
     if (!booking || !bookingId) return;
 
-    const payMethod  = booking.paymentMethod ?? paymentMethod ?? 'CASH';
+    const payMethod = booking.paymentMethod ?? paymentMethod ?? 'CASH';
     const fareAmount = booking.finalFare ?? booking.estimatedFare ?? parsedFare ?? 0;
 
     if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'].includes(payMethod)) {
@@ -341,37 +445,37 @@ export default function MatchingScreen() {
   // ── Status helpers ───────────────────────────────────────────
   const getStatusText = () => {
     switch (bookingStatus) {
-      case 'CREATED':        return 'Đang khởi tạo...';
+      case 'CREATED': return 'Đang khởi tạo...';
       case 'PENDING_PAYMENT':
         const method = bookingInfo?.paymentMethod || paymentMethod || 'ONLINE';
         return `Chờ thanh toán ${method === 'SEPAY' ? 'SePay' : method === 'ZALOPAY' ? 'ZaloPay' : method === 'MOMO' ? 'MoMo' : 'VNPay'}`;
-      case 'FINDING':        return 'Đang tìm tài xế...';
-      case 'FOUND':          return 'Đã tìm thấy tài xế';
-      case 'ARRIVING':       return 'Tài xế đang đến';
-      case 'STARTED':        return 'Chuyến đi đã bắt đầu';
-      case 'COMPLETED':      return 'Chuyến đi hoàn thành';
-      case 'CANCELLED':      return 'Chuyến đi đã bị hủy';
-      default:               return 'Đang cập nhật...';
+      case 'FINDING': return 'Đang tìm tài xế...';
+      case 'PENDING_DRIVER': return 'Đã tìm thấy tài xế';
+      case 'FOUND': return 'Tài xế đã nhận chuyến';
+      case 'ARRIVING': return 'Tài xế đang đến';
+      case 'STARTED': return 'Chuyến đi đã bắt đầu';
+      case 'COMPLETED': return 'Chuyến đi hoàn thành';
+      case 'PAID': return 'Đã thanh toán';
+      default: return 'Đang cập nhật...';
     }
   };
 
   const getStatusIcon = () => {
     switch (bookingStatus) {
-      case 'CREATED':        return <ActivityIndicator size="small" color={Colors.light.primary} />;
+      case 'CREATED': return <ActivityIndicator size="small" color={Colors.light.primary} />;
       case 'PENDING_PAYMENT':
         const method = bookingInfo?.paymentMethod || paymentMethod || 'ONLINE';
         const color = method === 'SEPAY' ? '#FF5E00' : method === 'ZALOPAY' ? '#0068FF' : method === 'MOMO' ? '#A50064' : '#AA2B52';
         return <ActivityIndicator size="small" color={color} />;
-      case 'FINDING':        return <ActivityIndicator size="small" color="#F59E0B" />;
-      case 'FOUND':          return <Text style={{ fontSize: 16 }}>👨‍✈️</Text>;
-      case 'ARRIVING':       return <Text style={{ fontSize: 16 }}>🚗</Text>;
-      case 'STARTED':        return <Text style={{ fontSize: 16 }}>📍</Text>;
-      case 'COMPLETED':      return <Text style={{ fontSize: 16 }}>✅</Text>;
-      case 'CANCELLED':      return <Text style={{ fontSize: 16 }}>❌</Text>;
-      default:               return <ActivityIndicator size="small" color={Colors.light.primary} />;
+      case 'FINDING': return <ActivityIndicator size="small" color="#F59E0B" />;
+      case 'PENDING_DRIVER': return <ActivityIndicator size="small" color="#6366F1" />;
+      case 'FOUND': return <Text style={{ fontSize: 16 }}>{'👨\u200d✈️'}</Text>;
+      case 'ARRIVING': return <Text style={{ fontSize: 16 }}>🚗</Text>;
+      case 'STARTED': return <Text style={{ fontSize: 16 }}>📍</Text>;
+      case 'COMPLETED': return <Text style={{ fontSize: 16 }}>✅</Text>;
+      default: return <ActivityIndicator size="small" color={Colors.light.primary} />;
     }
   };
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -390,9 +494,9 @@ export default function MatchingScreen() {
         <MapView
           style={styles.map}
           initialRegion={{
-            latitude:    centerLat,
-            longitude:   centerLng,
-            latitudeDelta:  hasValidCoords ? Math.abs(pLat - dLat) * 2.5 + 0.02 : 0.08,
+            latitude: centerLat,
+            longitude: centerLng,
+            latitudeDelta: hasValidCoords ? Math.abs(pLat - dLat) * 2.5 + 0.02 : 0.08,
             longitudeDelta: hasValidCoords ? Math.abs(pLng - dLng) * 2.5 + 0.02 : 0.08,
           }}
         >
@@ -400,15 +504,34 @@ export default function MatchingScreen() {
           <Marker
             coordinate={{ latitude: hasValidCoords ? pLat : 10.822, longitude: hasValidCoords ? pLng : 106.687 }}
             title="Điểm đón"
-            description={pickup ?? 'Điểm đón'}
-            pinColor="#10B981"
-          />
+            description={pickupText ?? 'Điểm đón'}
+            tracksViewChanges={true}
+          >
+            <View style={styles.radarMarkerWrap}>
+              {isFinding && (
+                <>
+                  <Animated.View
+                    style={[
+                      styles.radarPulse,
+                      { opacity: pulseOpacity, transform: [{ scale: pulseScale }] },
+                    ]}
+                  />
+                  <Animated.View style={[styles.radarSweep, { transform: [{ rotate: sweepRotation }] }]}>
+                    <View style={styles.radarSweepArm} />
+                  </Animated.View>
+                </>
+              )}
+              <View style={styles.pickupDotOuter}>
+                <View style={styles.pickupDotInner} />
+              </View>
+            </View>
+          </Marker>
           {/* Dropoff Marker */}
           {hasValidCoords && (
             <Marker
               coordinate={{ latitude: dLat, longitude: dLng }}
               title="Điểm đến"
-              description={dropoff ?? 'Điểm đến'}
+              description={dropoffText ?? 'Điểm đến'}
               pinColor="#EF4444"
             />
           )}
@@ -485,16 +608,16 @@ export default function MatchingScreen() {
           )}
 
           {/* ── Route summary ──────────────────────────────── */}
-          {pickup && dropoff && (
+          {pickupText && dropoffText && (
             <View style={styles.routeSummary}>
               <View style={styles.routePoint}>
                 <View style={[styles.routeDot, { backgroundColor: '#10B981' }]} />
-                <Text style={styles.routeAddress} numberOfLines={1}>{pickup}</Text>
+                <Text style={styles.routeAddress} numberOfLines={1}>{pickupText}</Text>
               </View>
               <View style={styles.routeLine} />
               <View style={styles.routePoint}>
                 <View style={[styles.routeDot, { backgroundColor: '#EF4444' }]} />
-                <Text style={styles.routeAddress} numberOfLines={1}>{dropoff}</Text>
+                <Text style={styles.routeAddress} numberOfLines={1}>{dropoffText}</Text>
               </View>
             </View>
           )}
@@ -607,28 +730,61 @@ export default function MatchingScreen() {
           )}
 
           {/* ── Finding / Cancel ─────────────────────────── */}
-          {isFinding && (
+          {['FINDING', 'CREATED', 'FOUND', 'ARRIVING', 'STARTED'].includes(bookingStatus) && (
             <View style={styles.findingContainer}>
-              <Text style={styles.findingSubtext}>
-                Hệ thống đang kết nối bạn với tài xế gần nhất
-              </Text>
-              {elapsedSeconds > 0 && (
+              {isFinding ? (
+                <Text style={styles.findingSubtext}>
+                  {statusSubtext}
+                </Text>
+              ) : (
+                <Text style={[styles.findingSubtext, { color: '#9CA3AF', marginBottom: 12 }]}>
+                  Bạn có thể hủy chuyến đi trước khi hoàn tất hoặc thanh toán.
+                </Text>
+              )}
+              {isActivelySearching && elapsedSeconds > 0 && (
                 <Text style={styles.elapsedText}>
                   {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
                 </Text>
               )}
               <TouchableOpacity
-                style={styles.cancelButton}
-                onPress={async () => {
-                  try {
-                    await api.post(`/api/v1/bookings/${bookingId}/cancel`);
-                    router.replace('/(tabs)/explore');
-                  } catch {
-                    Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                style={[
+                  styles.cancelButton,
+                  !isFinding && {
+                    backgroundColor: '#FEE2E2',
+                    borderRadius: 14,
+                    paddingVertical: 14,
+                    width: '100%',
+                    alignItems: 'center',
+                    borderWidth: 1,
+                    borderColor: '#FECACA',
                   }
+                ]}
+                onPress={() => {
+                  Alert.alert(
+                    'Xác nhận hủy',
+                    'Bạn có chắc chắn muốn hủy chuyến xe này không?',
+                    [
+                      { text: 'Quay lại', style: 'cancel' },
+                      {
+                        text: 'Hủy chuyến',
+                        style: 'destructive',
+                        onPress: async () => {
+                          try {
+                            await api.post(`/api/v1/bookings/${bookingId}/cancel`);
+                            Alert.alert('Thành công', 'Đã hủy chuyến đi thành công.');
+                            router.replace('/(tabs)/explore');
+                          } catch (err) {
+                            Alert.alert('Lỗi', 'Không thể hủy chuyến. Vui lòng thử lại.');
+                          }
+                        }
+                      }
+                    ]
+                  );
                 }}
               >
-                <Text style={styles.cancelText}>Hủy chuyến</Text>
+                <Text style={[styles.cancelText, !isFinding && { color: '#EF4444', fontWeight: '800' }]}>
+                  Hủy chuyến
+                </Text>
               </TouchableOpacity>
             </View>
           )}
@@ -665,22 +821,22 @@ export default function MatchingScreen() {
 // Styles
 // ─────────────────────────────────────────────
 const styles = StyleSheet.create({
-  container:     { flex: 1, backgroundColor: '#fff' },
+  container: { flex: 1, backgroundColor: '#fff' },
   header: {
     flexDirection: 'row', alignItems: 'center',
     paddingHorizontal: 15, paddingVertical: 10,
     borderBottomWidth: 1, borderBottomColor: '#F2F2F2',
     backgroundColor: '#fff',
   },
-  backButton:    { padding: 5 },
-  headerTitle:   { fontSize: 18, fontWeight: 'bold', marginLeft: 10, flex: 1 },
+  backButton: { padding: 5 },
+  headerTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, flex: 1 },
   homeButton: {
     paddingHorizontal: 12, paddingVertical: 6,
     backgroundColor: '#F0F0F0', borderRadius: 15,
   },
-  homeButtonText:{ fontSize: 12, fontWeight: 'bold', color: '#666' },
-  content:       { flex: 1 },
-  map:          { flex: 1 },
+  homeButtonText: { fontSize: 12, fontWeight: 'bold', color: '#666' },
+  content: { flex: 1 },
+  map: { flex: 1 },
   statusCard: {
     backgroundColor: '#fff', borderTopLeftRadius: 24, borderTopRightRadius: 24,
     padding: 24, elevation: 10, shadowColor: '#000',
@@ -691,20 +847,20 @@ const styles = StyleSheet.create({
     backgroundColor: '#EEF2FF', paddingHorizontal: 16, paddingVertical: 10,
     borderRadius: 12, gap: 10, marginBottom: 16,
   },
-  statusText:   { fontSize: 16, fontWeight: 'bold', color: Colors.light.primary },
+  statusText: { fontSize: 16, fontWeight: 'bold', color: Colors.light.primary },
   routeSummary: { marginBottom: 16, paddingHorizontal: 4 },
-  routePoint:   { flexDirection: 'row', alignItems: 'center', gap: 10 },
-  routeDot:     { width: 10, height: 10, borderRadius: 5 },
+  routePoint: { flexDirection: 'row', alignItems: 'center', gap: 10 },
+  routeDot: { width: 10, height: 10, borderRadius: 5 },
   routeAddress: { fontSize: 13, color: '#374151', flex: 1 },
-  routeLine:    { width: 2, height: 16, backgroundColor: '#E5E7EB', marginLeft: 4, marginVertical: 4 },
+  routeLine: { width: 2, height: 16, backgroundColor: '#E5E7EB', marginLeft: 4, marginVertical: 4 },
   pricingSection: {
     borderTopWidth: 1, borderTopColor: '#F0F0F0', paddingTop: 12,
   },
-  pricingRow:   {
+  pricingRow: {
     flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center',
     paddingVertical: 8,
   },
-  pricingLeft:  { flexDirection: 'row', alignItems: 'center', gap: 8 },
+  pricingLeft: { flexDirection: 'row', alignItems: 'center', gap: 8 },
   pricingLabel: { fontSize: 14, color: '#6B7280' },
   pricingValue: { fontSize: 18, fontWeight: '800', color: '#1F2937' },
   surgeTag: {
@@ -716,6 +872,44 @@ const styles = StyleSheet.create({
   findingSubtext: {
     fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20,
   },
+  chatButton: {
+    alignSelf: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    paddingHorizontal: 14,
+    paddingVertical: 10,
+    borderRadius: 999,
+    backgroundColor: '#EFF6FF',
+    marginBottom: 10,
+  },
+  chatButtonText: {
+    color: '#2563EB',
+    fontWeight: '700',
+    fontSize: 13,
+  },
+  cancelButton: { paddingVertical: 10, paddingHorizontal: 20 },
+  cancelText: { color: '#FF4444', fontWeight: 'bold', fontSize: 15 },
+  paymentLoadingOverlay: {
+    marginTop: 16, alignItems: 'center', padding: 16,
+    backgroundColor: '#F9FAFB', borderRadius: 12, gap: 8,
+  },
+  paymentLoadingText: { fontSize: 14, color: Colors.light.primary, fontWeight: '600' },
+  vnpayContainer: { alignItems: 'center', paddingVertical: 16, gap: 12 },
+  vnpaySubtext: {
+    fontSize: 14, color: '#AA2B52', textAlign: 'center', fontWeight: '600',
+  },
+  vnpayButton: {
+    backgroundColor: '#AA2B52',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  vnpayCancelButton: { paddingVertical: 8 },
+  vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
   driverCard: {
     padding: 16,
     backgroundColor: '#F9FAFB',
@@ -799,36 +993,47 @@ const styles = StyleSheet.create({
     fontSize: 22, fontWeight: '800', color: '#F59E0B',
     textAlign: 'center', marginBottom: 12, fontVariant: ['tabular-nums'],
   },
-  cancelButton: { paddingVertical: 10, paddingHorizontal: 20 },
-  cancelText:  { color: '#FF4444', fontWeight: 'bold', fontSize: 15 },
-  paymentLoadingOverlay: {
-    marginTop: 16, alignItems: 'center', padding: 16,
-    backgroundColor: '#F9FAFB', borderRadius: 12, gap: 8,
+  radarMarkerWrap: {
+    width: 160,
+    height: 160,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
   },
-  paymentLoadingText: { fontSize: 14, color: Colors.light.primary, fontWeight: '600' },
-  vnpayContainer: { alignItems: 'center', paddingVertical: 16, gap: 12 },
-  vnpaySubtext: {
-    fontSize: 14, color: '#AA2B52', textAlign: 'center', fontWeight: '600',
+  radarPulse: {
+    position: 'absolute',
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    backgroundColor: '#10B981',
   },
-  vnpayButton: {
-    backgroundColor: '#AA2B52',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    width: '100%',
+  radarSweep: {
+    position: 'absolute',
+    width: 64,
+    height: 64,
+    borderRadius: 32,
     alignItems: 'center',
   },
-  vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  vnpayCancelButton: { paddingVertical: 8 },
-  vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
-  cancelledContainer: { alignItems: 'center', paddingVertical: 20, gap: 4 },
-  cancelledTitle: { fontSize: 18, fontWeight: '800', color: '#EF4444', marginBottom: 4 },
-  cancelledSubtext: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
-  cancelledButton: {
-    paddingVertical: 14, paddingHorizontal: 32,
-    borderRadius: 16, width: '100%', alignItems: 'center',
+  radarSweepArm: {
+    width: 2,
+    height: 32,
+    backgroundColor: 'rgba(16, 185, 129, 0.55)',
+    borderRadius: 1,
   },
-  cancelledButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  cancelledHomeButton: { paddingVertical: 10 },
-  cancelledHomeButtonText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
+  pickupDotOuter: {
+    width: 28,
+    height: 28,
+    borderRadius: 14,
+    backgroundColor: '#FFF',
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 3,
+    borderColor: '#10B981',
+  },
+  pickupDotInner: {
+    width: 12,
+    height: 12,
+    borderRadius: 6,
+    backgroundColor: '#10B981',
+  },
 });
