@@ -7,20 +7,22 @@ import { useRouter, useFocusEffect } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { buildDriverDisplayInfo, DriverDisplayInfo } from '@/services/driverService';
 
-const inferRideUiStatus = (payload: any) => {
-  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
-  const title = String(payload?.title ?? '').toLowerCase();
-  const message = String(payload?.message ?? '').toLowerCase();
+/**
+ * Valid BookingStatus enum values from backend.
+ * Source: booking-service/.../enums/BookingStatus.java
+ */
+const BOOKING_STATUS_SET = new Set([
+  'CREATED', 'PENDING_PAYMENT', 'MATCHING', 'ASSIGNED',
+  'ACCEPTED', 'PICKUP', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED',
+]);
 
-  if (['MATCHING', 'CREATED'].includes(rawStatus) || message.includes('tìm tài xế')) return 'MATCHING';
-  if (rawStatus === 'ASSIGNED') return 'ASSIGNED';
-  if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP' || title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
-  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'IN_PROGRESS';
-  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
-  if (rawStatus === 'CANCELLED' || title.includes('hủy') || message.includes('hủy')) return 'CANCELLED';
-  return undefined;
-};
+/**
+ * Check if a booking status is a valid BookingStatus enum value.
+ * Only accepts valid BookingStatus values — no Vietnamese text parsing.
+ */
+const isValidBookingStatus = (status: string) => BOOKING_STATUS_SET.has(status);
 
 const formatVND = (num: number) => {
   return (num || 0).toLocaleString('vi-VN') + 'đ';
@@ -83,7 +85,6 @@ export default function HomeScreen() {
   const [latestNotification, setLatestNotification] = useState('Chào mừng bạn đến với CAB Booking! Hãy đặt chuyến xe đầu tiên.');
   const [recentBookings, setRecentBookings] = useState<any[]>([]);
   const [showTrackingModal, setShowTrackingModal] = useState(false);
-  const [matchedDriver, setMatchedDriver] = useState<any>(null);
 
   // Promo Carousel State & Animation
   const [currentPromoIdx, setCurrentPromoIdx] = useState(0);
@@ -138,7 +139,6 @@ export default function HomeScreen() {
       };
 
       socket.on('new_notification', handleUpdate);
-      socket.on('booking_status_update', handleUpdate);
       socket.on('receive_message', (data: any) => {
         if (data?.bookingId) {
           fetchDashboardData();
@@ -204,7 +204,6 @@ export default function HomeScreen() {
     return () => {
       if (socket) {
         socket.off('new_notification');
-        socket.off('booking_status_update');
         socket.off('receive_message');
       }
       clearInterval(bannerTimer);
@@ -212,20 +211,12 @@ export default function HomeScreen() {
     };
   }, [socket]);
 
-  useEffect(() => {
-    if (!isActive) return;
-
-    const interval = setInterval(() => {
-      fetchDashboardData();
-    }, 5000);
-
-    return () => clearInterval(interval);
-  }, [isActive]);
-
   const getStatusInVietnamese = (status: string) => {
     switch (status) {
       case 'COMPLETED': return 'đã hoàn thành';
       case 'CANCELLED': return 'đã hủy';
+      case 'CREATED': return 'đang khởi tạo';
+      case 'PENDING_PAYMENT': return 'chờ thanh toán';
       case 'MATCHING': return 'đang tìm tài xế';
       case 'ACCEPTED':
       case 'ASSIGNED': return 'đã nhận chuyến';
@@ -239,23 +230,25 @@ export default function HomeScreen() {
   const currentPromo = BANNER_PROMOS[currentPromoIdx];
 
   // Detect if the user has an active (in-progress) booking
-  const ACTIVE_STATUSES = ['MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
+  const ACTIVE_STATUSES = ['CREATED', 'PENDING_PAYMENT', 'MATCHING', 'ACCEPTED', 'ASSIGNED', 'ARRIVING', 'STARTED', 'IN_PROGRESS', 'PICKUP'];
   const latestBooking = recentBookings.find((b: any) => ACTIVE_STATUSES.includes(b.status));
   const isActive = !!latestBooking;
 
+  // Build driver display info from active booking (safe fallback — no backend endpoint for passenger)
+  const driverDisplayInfo: DriverDisplayInfo | null = latestBooking
+    ? buildDriverDisplayInfo(latestBooking.assignedDriverId)
+    : null;
+
+  // ── Poll active booking while visible ──────────────────────
   useEffect(() => {
-    if (latestBooking?.assignedDriverId) {
-      api.get(`/api/drivers/${latestBooking.assignedDriverId}/profile`)
-        .then(res => {
-          if (res.data?.result) {
-            setMatchedDriver(res.data.result);
-          }
-        })
-        .catch(err => console.log('Failed to fetch matched driver profile in home:', err));
-    } else {
-      setMatchedDriver(null);
-    }
-  }, [latestBooking?.assignedDriverId]);
+    if (!isActive) return;
+
+    const interval = setInterval(() => {
+      fetchDashboardData();
+    }, 5000);
+
+    return () => clearInterval(interval);
+  }, [isActive]);
 
   return (
     <SafeAreaView style={styles.container}>
@@ -529,20 +522,33 @@ export default function HomeScreen() {
                 {/* Driver Details (If matched) */}
                 <View style={styles.modalSectionCard}>
                   <Text style={styles.modalSectionTitle}>Tài xế phục vụ</Text>
-                  {latestBooking.assignedDriverId ? (
+                  {driverDisplayInfo?.hasDriver ? (
                     <>
                       <View style={styles.modalDriverRow}>
                         <View style={styles.modalDriverAvatar}>
                           <Text style={styles.modalDriverAvatarText}>TX</Text>
                         </View>
                         <View style={{ flex: 1, marginLeft: 12 }}>
-                          <Text style={styles.modalDriverName}>{matchedDriver ? matchedDriver.fullName : 'Tài xế'}</Text>
-                          <Text style={styles.modalDriverSubtext}>
-                            {matchedDriver ? `Biển số: ${matchedDriver.vehiclePlate ?? 'N/A'} • ${matchedDriver.vehicleColor ?? 'N/A'} • ${matchedDriver.vehicleModel ?? 'N/A'}` : 'Đang tải xe...'}
+                          <Text style={styles.modalDriverName}>
+                            {driverDisplayInfo.fullName || 'Tài xế đã nhận chuyến'}
                           </Text>
-                          <Text style={styles.modalDriverRating}>
-                            ⭐ {matchedDriver?.averageRating ? Number(matchedDriver.averageRating).toFixed(1) : '5.0'} ({matchedDriver?.totalCompletedRides ?? 0} chuyến đi)
-                          </Text>
+                          {driverDisplayInfo.shortId && (
+                            <Text style={styles.modalDriverSubtext}>Mã tài xế: {driverDisplayInfo.shortId}</Text>
+                          )}
+                          {/* Only show rating if backend provides it */}
+                          {driverDisplayInfo.averageRating != null && driverDisplayInfo.totalCompletedRides != null && (
+                            <Text style={styles.modalDriverRating}>
+                              ⭐ {driverDisplayInfo.averageRating.toFixed(1)} ({driverDisplayInfo.totalCompletedRides} chuyến đi)
+                            </Text>
+                          )}
+                          {/* Only show vehicle plate if backend provides it */}
+                          {driverDisplayInfo.vehiclePlate && (
+                            <Text style={styles.modalDriverSubtext}>
+                              Biển số: {driverDisplayInfo.vehiclePlate}
+                              {driverDisplayInfo.vehicleColor ? ` • ${driverDisplayInfo.vehicleColor}` : ''}
+                              {driverDisplayInfo.vehicleModel ? ` • ${driverDisplayInfo.vehicleModel}` : ''}
+                            </Text>
+                          )}
                         </View>
                       </View>
 
@@ -554,7 +560,7 @@ export default function HomeScreen() {
                             setShowTrackingModal(false);
                             router.push({
                               pathname: '/(ride)/chat',
-                              params: { bookingId: latestBooking.id, driverName: matchedDriver?.fullName ?? 'Tài xế' }
+                              params: { bookingId: latestBooking.id, driverName: driverDisplayInfo.fullName || 'Tài xế' }
                             });
                           }}
                         >
@@ -565,7 +571,9 @@ export default function HomeScreen() {
                         <TouchableOpacity
                           style={styles.modalCallButton}
                           onPress={() => {
-                            Alert.alert('Gọi tài xế', `Đang kết nối cuộc gọi đến ${matchedDriver?.fullName ?? 'tài xế'} qua số ${matchedDriver?.phoneNumber ?? 'N/A'}...`);
+                            Alert.alert('Gọi tài xế', driverDisplayInfo.phoneNumber
+                              ? `Đang kết nối cuộc gọi đến tài xế qua số ${driverDisplayInfo.phoneNumber}...`
+                              : 'Không có số điện thoại tài xế. Vui lòng sử dụng chat.');
                           }}
                         >
                           <Phone size={18} color="#2563EB" style={{ marginRight: 6 }} />

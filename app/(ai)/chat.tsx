@@ -375,7 +375,10 @@ export default function AIChatScreen() {
       dropoffCoords: dropoffPlace.coords,
       fare: Math.round(calculatedFare / 1000) * 1000,
       vehicle,
-      payment: 'CASH',
+      payment: 'CASH' as const,
+      estimateId: undefined as string | undefined,
+      quotePayloadHash: undefined as string | undefined,
+      surgeMultiplier: undefined as number | undefined,
     };
   };
 

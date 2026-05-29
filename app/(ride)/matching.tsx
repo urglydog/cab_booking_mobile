@@ -7,6 +7,7 @@ import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock, MessageSquare } fro
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import { usePayment } from '@/hooks/usePayment';
+import { useRideSocket } from '@/hooks/useRideSocket';
 import { Colors } from '@/constants/Colors';
 import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
@@ -19,21 +20,61 @@ const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
   return roomId === bookingId || roomId === `ROOM_${bookingId}`;
 };
 
+/**
+ * Valid BookingStatus enum values from backend.
+ * Source: booking-service/.../enums/BookingStatus.java
+ */
+const BOOKING_STATUS_SET = new Set([
+  'CREATED', 'PENDING_PAYMENT', 'MATCHING', 'ASSIGNED',
+  'ACCEPTED', 'PICKUP', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED',
+]);
+
 const inferRideUiStatus = (payload: any) => {
-  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
+  const rawStatus = String(
+    payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? ''
+  ).toUpperCase();
   const title = String(payload?.title ?? '').toLowerCase();
   const message = String(payload?.message ?? '').toLowerCase();
 
-  if (['MATCHING', 'CREATED', 'REJECTED', 'RIDE.REJECTED', 'RIDE_REJECTED'].includes(rawStatus) || message.includes('tìm tài xế') || message.includes('từ chối') || message.includes('reject') || message.includes('hủy') && !['CANCELLED', 'COMPLETED'].includes(rawStatus)) return 'FINDING';
-  // ASSIGNED = driver found but NOT yet confirmed by driver (pending acceptance)
-  if (rawStatus === 'ASSIGNED') return 'PENDING_DRIVER';
-  // ACCEPTED = driver explicitly confirmed the ride
-  if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP') return 'FOUND';
-  if (title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
-  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
-  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
+  if (BOOKING_STATUS_SET.has(rawStatus)) {
+    switch (rawStatus) {
+      case 'CREATED':
+      case 'MATCHING':
+        return 'FINDING';
+      case 'PENDING_PAYMENT':
+        return 'PENDING_PAYMENT';
+      case 'ASSIGNED':
+        return 'PENDING_DRIVER';
+      case 'ACCEPTED':
+        return 'FOUND';
+      case 'PICKUP':
+        return 'ARRIVING';
+      case 'IN_PROGRESS':
+        return 'STARTED';
+      case 'COMPLETED':
+        return 'COMPLETED';
+      case 'CANCELLED':
+        return 'CANCELLED';
+      default:
+        return undefined;
+    }
+  }
+
   if (rawStatus === 'PAID') return 'PAID';
-  if (rawStatus === 'CANCELLED' || ['TIMEOUT', 'BOOKING.TIMEOUT'].includes(rawStatus) || title.includes('hủy') || message.includes('không tìm thấy tài xế') || title.includes('hết thời gian')) return 'CANCELLED';
+  if (['TIMEOUT', 'BOOKING.TIMEOUT'].includes(rawStatus)) return 'CANCELLED';
+  if (title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
+  if (title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
+  if (title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
+  if (title.includes('hủy') || message.includes('không tìm thấy tài xế') || title.includes('hết thời gian')) return 'CANCELLED';
+  if (
+    ['REJECTED', 'RIDE.REJECTED', 'RIDE_REJECTED'].includes(rawStatus) ||
+    message.includes('tìm tài xế') ||
+    message.includes('từ chối') ||
+    message.includes('reject')
+  ) {
+    return 'FINDING';
+  }
+
   return undefined;
 };
 
@@ -94,11 +135,16 @@ export default function MatchingScreen() {
 
   const { socket } = useSocket();
   const { initPayment, startPolling, stopPolling } = usePayment();
+  const { driverLocation } = useRideSocket(bookingId);
 
-  const [bookingStatus, setBookingStatus] = useState<string>('CREATED');
+  // If prepaid method, start in PENDING_PAYMENT to avoid fake "finding driver" flash
+  const [bookingStatus, setBookingStatus] = useState<string>(
+    paymentMethod && paymentMethod !== 'CASH' ? 'PENDING_PAYMENT' : 'CREATED'
+  );
   const [bookingInfo, setBookingInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [matchedDriver, setMatchedDriver] = useState<any>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [statusSubtext, setStatusSubtext] = useState<string>('Hệ thống đang kết nối bạn với tài xế gần nhất');
 
   const pulse = useRef(new Animated.Value(0)).current;
@@ -246,6 +292,11 @@ export default function MatchingScreen() {
     }
   };
 
+  // ── Derived UI flags (must be declared before useEffects that reference them) ──
+  const isActivelySearching = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
+  const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
+  const isSurge = parsedSurge > 1.0;
+
   // ── Poll booking status ──────────────────────────────────────
   useEffect(() => {
     if (!bookingId) return;
@@ -262,59 +313,62 @@ export default function MatchingScreen() {
     return () => { socket.emit('leave_room', bookingId); };
   }, [socket, bookingId]);
 
+  // ── Elapsed timer for FINDING/CREATED status ──────────────────
+  useEffect(() => {
+    if (!isActivelySearching) return;
+    setElapsedSeconds(0);
+    const timer = setInterval(() => setElapsedSeconds(prev => prev + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isActivelySearching]);
+
   useEffect(() => {
     if (!socket) return;
 
+    /**
+     * When a notification arrives, re-fetch the booking to get the real
+     * BookingStatus from the backend (notifications don't carry booking status).
+     * This replaces the old Vietnamese text parsing approach.
+     */
     const handleNotification = (data: any) => {
       if (!isRoomUpdateForBooking(data, bookingId as string)) return;
 
-      const inferredStatus = inferRideUiStatus(data);
-      if (!inferredStatus) return;
+      api.get(`/api/v1/bookings/${bookingId}`)
+        .then(res => {
+          if (!res.data?.result) return;
+          const freshBooking = res.data.result;
+          setBookingInfo(freshBooking);
 
-      if (inferredStatus === 'COMPLETED') {
-        setBookingStatus('COMPLETED');
-        fetchBookingInfo();
-      } else if (inferredStatus === 'PAID') {
-        setBookingStatus('PAID');
-        router.replace('/(tabs)/explore');
-      } else if (inferredStatus === 'CANCELLED') {
-        if (data.message) {
-          Alert.alert('Thông báo', data.message);
-        }
-        router.replace('/(tabs)/explore');
-      } else if (inferredStatus === 'FINDING') {
-        // Driver cancelled or timed out — show contextual message, keep radar spinning
-        setBookingStatus('FINDING');
-        const msg = data.message;
-        if (msg && (msg.includes('hủy') || msg.includes('từ chối') || msg.includes('chưa kịp') || msg.includes('reject') || msg.includes('timeout'))) {
-          setStatusSubtext(msg);
-        } else if (msg) {
-          setStatusSubtext(msg);
-        } else {
-          setStatusSubtext('Tài xế chưa kịp nhận chuyến. Đang tìm tài xế khác cho bạn...');
-        }
-        // Reset driver card since driver is no longer assigned
-        setMatchedDriver(null);
-        fetchBookingInfo();
-      } else {
-        setBookingStatus(inferredStatus);
-
-        // Update subtext dynamically based on websocket broadcast messages
-        if (inferredStatus === 'PENDING_DRIVER') {
-          setStatusSubtext(data.message || 'Đã tìm thấy tài xế! Đang chờ tài xế xác nhận chuyến...');
-        } else if (inferredStatus === 'FOUND') {
-          setStatusSubtext(data.message || 'Tài xế đã nhận chuyến. Tài xế đang đến điểm đón của bạn.');
-        } else if (inferredStatus === 'ARRIVING') {
-          setStatusSubtext(data.message || 'Tài xế đang đến điểm đón của bạn.');
-        } else if (inferredStatus === 'STARTED') {
-          setStatusSubtext(data.message || 'Chuyến đi đã bắt đầu.');
-        } else if (data.message) {
-          setStatusSubtext(data.message);
-        }
-
-        // Force refresh booking details immediately to synchronize driver assignment state
-        fetchBookingInfo();
-      }
+          const inferredStatus = inferRideUiStatus(freshBooking) ?? inferRideUiStatus(data);
+          if (inferredStatus === 'COMPLETED') {
+            setBookingStatus('COMPLETED');
+            handleRideCompleted(freshBooking);
+          } else if (inferredStatus === 'PAID') {
+            setBookingStatus('PAID');
+            router.replace('/(tabs)/explore');
+          } else if (inferredStatus === 'CANCELLED') {
+            setBookingStatus('CANCELLED');
+            if (data.message) {
+              Alert.alert('Thông báo', data.message);
+            }
+          } else if (inferredStatus === 'FINDING') {
+            setBookingStatus('FINDING');
+            const msg = String(data?.message ?? '');
+            setStatusSubtext(msg || 'Tài xế chưa kịp nhận chuyến. Đang tìm tài xế khác cho bạn...');
+            setMatchedDriver(null);
+          } else if (inferredStatus) {
+            setBookingStatus(inferredStatus);
+            if (inferredStatus === 'PENDING_DRIVER') {
+              setStatusSubtext(data.message || 'Đã tìm thấy tài xế! Đang chờ tài xế xác nhận chuyến...');
+            } else if (inferredStatus === 'FOUND') {
+              setStatusSubtext(data.message || 'Tài xế đã nhận chuyến. Tài xế đang đến điểm đón của bạn.');
+            } else if (inferredStatus === 'ARRIVING') {
+              setStatusSubtext(data.message || 'Tài xế đang đến điểm đón của bạn.');
+            } else if (inferredStatus === 'STARTED') {
+              setStatusSubtext(data.message || 'Chuyến đi đã bắt đầu.');
+            }
+          }
+        })
+        .catch(() => {});
     };
 
     socket.on('new_notification', handleNotification);
@@ -323,7 +377,7 @@ export default function MatchingScreen() {
       socket.off('new_notification', handleNotification);
       socket.off('booking_status_update', handleNotification);
     };
-  }, [socket, bookingId]);
+  }, [socket, bookingId, router]);
 
   // ── Payment flow ─────────────────────────────────────────────
   const handleRideCompleted = async (info?: any) => {
@@ -334,7 +388,7 @@ export default function MatchingScreen() {
     const fareAmount = booking.finalFare ?? booking.estimatedFare ?? parsedFare ?? 0;
 
     if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'].includes(payMethod)) {
-      setBookingStatus('PAID');
+      setBookingStatus('COMPLETED');
       stopPolling?.();
       router.replace({
         pathname: '/(review)/review',
@@ -422,10 +476,6 @@ export default function MatchingScreen() {
       default: return <ActivityIndicator size="small" color={Colors.light.primary} />;
     }
   };
-
-  const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
-  const isSurge = parsedSurge > 1.0;
-
   return (
     <SafeAreaView style={styles.container}>
       {/* Header */}
@@ -491,6 +541,18 @@ export default function MatchingScreen() {
             strokeColor={Colors.light.primary}
             strokeWidth={4}
           />
+          {/* Driver location marker (Phase 3: Ride GPS Socket Tracking) */}
+          {driverLocation && (
+            <Marker
+              coordinate={{
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+              }}
+              title="Tài xế"
+              description="Vị trí hiện tại của tài xế"
+              pinColor="#3B82F6"
+            />
+          )}
         </MapView>
 
         {/* Status Card */}
@@ -679,6 +741,11 @@ export default function MatchingScreen() {
                   Bạn có thể hủy chuyến đi trước khi hoàn tất hoặc thanh toán.
                 </Text>
               )}
+              {isActivelySearching && elapsedSeconds > 0 && (
+                <Text style={styles.elapsedText}>
+                  {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
+                </Text>
+              )}
               <TouchableOpacity
                 style={[
                   styles.cancelButton,
@@ -718,6 +785,29 @@ export default function MatchingScreen() {
                 <Text style={[styles.cancelText, !isFinding && { color: '#EF4444', fontWeight: '800' }]}>
                   Hủy chuyến
                 </Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── Cancelled ────────────────────────────────── */}
+          {isCancelled && (
+            <View style={styles.cancelledContainer}>
+              <Text style={{ fontSize: 32, marginBottom: 8 }}>🚫</Text>
+              <Text style={styles.cancelledTitle}>Chuyến đi đã bị hủy</Text>
+              <Text style={styles.cancelledSubtext}>
+                Chuyến đi của bạn đã bị hủy. Bạn có thể đặt lại hoặc quay về trang chủ.
+              </Text>
+              <TouchableOpacity
+                style={[styles.cancelledButton, { backgroundColor: Colors.light.primary }]}
+                onPress={() => router.replace('/(ride)/booking')}
+              >
+                <Text style={styles.cancelledButtonText}>Đặt lại chuyến</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelledHomeButton}
+                onPress={() => router.replace('/(tabs)')}
+              >
+                <Text style={styles.cancelledHomeButtonText}>Về trang chủ</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -898,6 +988,10 @@ const styles = StyleSheet.create({
     color: '#374151',
     fontWeight: 'bold',
     fontSize: 13,
+  },
+  elapsedText: {
+    fontSize: 22, fontWeight: '800', color: '#F59E0B',
+    textAlign: 'center', marginBottom: 12, fontVariant: ['tabular-nums'],
   },
   radarMarkerWrap: {
     width: 160,
