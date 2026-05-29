@@ -107,6 +107,8 @@ export default function RootLayout() {
     if (!isReady) return;
     if (hasToken && segments[0] === '(auth)') {
       router.replace('/(tabs)');
+    } else if (!hasToken && segments[0] !== '(auth)') {
+      router.replace('/(auth)/login');
     }
   }, [hasToken, isReady, segments]);
 

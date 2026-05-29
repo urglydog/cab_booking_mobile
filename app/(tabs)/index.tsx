@@ -357,8 +357,8 @@ export default function HomeScreen() {
               <Text style={styles.notificationText}>
                 {isActive ? (
                   latestBooking.status === 'MATCHING' ? 'Đang tìm tài xế gần nhất cho bạn...' :
-                  latestBooking.status === 'ASSIGNED' || latestBooking.status === 'ACCEPTED' ? `Tài xế ${matchedDriver?.fullName ?? 'đã nhận chuyến'} đang chuẩn bị đón bạn.` :
-                  latestBooking.status === 'ARRIVING' ? `Tài xế ${matchedDriver?.fullName ?? ''} đã đến điểm đón.` :
+                  latestBooking.status === 'ASSIGNED' || latestBooking.status === 'ACCEPTED' ? `Tài xế ${driverDisplayInfo?.fullName ?? 'đã nhận chuyến'} đang chuẩn bị đón bạn.` :
+                  latestBooking.status === 'ARRIVING' ? `Tài xế ${driverDisplayInfo?.fullName ?? ''} đã đến điểm đón.` :
                   latestBooking.status === 'STARTED' || latestBooking.status === 'IN_PROGRESS' ? 'Chuyến đi của bạn đang diễn ra.' :
                   'Đang cập nhật trạng thái chuyến đi...'
                 ) : (
