@@ -589,7 +589,7 @@ export default function BookingScreen() {
         Alert.alert('Lỗi đặt xe', msg);
       }
     } catch (error: any) {
-      console.error('Booking error:', error?.response?.data ?? error);
+      console.log('Booking error:', error?.response?.data ?? error);
       if (error?.response?.status === 409) {
         const existingId = error?.response?.data?.result?.id;
         if (existingId) {
@@ -600,7 +600,11 @@ export default function BookingScreen() {
       } else if (
         (error?.response?.status === 422 && error?.response?.data?.errorMessage === 'PASSENGER_HAS_ACTIVE_RIDE') ||
         (error?.response?.data?.code === 422 && error?.response?.data?.errorMessage === 'PASSENGER_HAS_ACTIVE_RIDE') ||
-        error?.response?.data?.errorCode === 'PASSENGER_HAS_ACTIVE_RIDE'
+        error?.response?.data?.errorCode === 'PASSENGER_HAS_ACTIVE_RIDE' ||
+        String(error?.response?.data?.message ?? '').includes('đang có chuyến') ||
+        String(error?.response?.data?.errorMessage ?? '').includes('đang có chuyến') ||
+        String(error?.response?.data?.message ?? '').includes('chuyến xe chưa hoàn thành') ||
+        String(error?.response?.data?.errorMessage ?? '').includes('chuyến xe chưa hoàn thành')
       ) {
         // Show notification then redirect to the existing active ride
         Alert.alert(

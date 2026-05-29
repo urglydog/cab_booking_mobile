@@ -338,7 +338,7 @@ export default function MatchingScreen() {
       stopPolling?.();
       router.replace({
         pathname: '/(review)/review',
-        params: { rideId: bookingId, driverId: booking.driverId ?? 'driver-mock-123' },
+        params: { rideId: bookingId, driverId: booking.driverId ?? booking.assignedDriverId ?? 'driver-mock-123' },
       });
       return;
     }
