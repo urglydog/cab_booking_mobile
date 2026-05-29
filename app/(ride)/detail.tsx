@@ -10,6 +10,7 @@ import { usePayment } from '@/hooks/usePayment';
 import { PaymentService, PaymentMethod } from '@/services/paymentService';
 import { useSocket } from '@/hooks/useSocket';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
+import { buildDriverDisplayInfo, DriverDisplayInfo } from '@/services/driverService';
 
 const REVIEW_TAGS = [
   'Dịch vụ 5 sao 🌟',
@@ -29,6 +30,7 @@ export default function RideDetailScreen() {
   const [loading, setLoading] = useState(true);
   const [paymentInfo, setPaymentInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
+  const [driverInfo, setDriverInfo] = useState<DriverDisplayInfo | null>(null);
 
   // Review states
   const [rating, setRating] = useState(5);
@@ -86,6 +88,8 @@ export default function RideDetailScreen() {
         console.log('Failed to read local promo info:', e);
       }
       setBooking(bookingData);
+      // Build driver display info from booking data (safe fallback — no backend endpoint for passenger)
+      setDriverInfo(buildDriverDisplayInfo(bookingData.assignedDriverId));
     }
 
     // Turn off loading immediately once core booking data is retrieved
@@ -93,7 +97,7 @@ export default function RideDetailScreen() {
 
     // 2. Fetch payment info asynchronously (non-blocking)
     if (bookingData && bookingData.status === 'COMPLETED') {
-      api.get(`/api/payments/booking/${bookingId}`)
+      api.get(`/api/v1/payments/booking/${bookingId}`)
         .then(paymentResponse => {
           if (paymentResponse.data?.result) {
             setPaymentInfo(paymentResponse.data.result);
@@ -166,13 +170,11 @@ export default function RideDetailScreen() {
 
     if (socket) {
       socket.on('new_notification', refreshBookingDetail);
-      socket.on('booking_status_update', refreshBookingDetail);
     }
 
     return () => {
       if (socket) {
         socket.off('new_notification', refreshBookingDetail);
-        socket.off('booking_status_update', refreshBookingDetail);
       }
     };
   }, [socket, bookingId]);
@@ -231,6 +233,8 @@ export default function RideDetailScreen() {
       FAILED_FINAL: { text: 'Thanh toán thất bại', color: '#EF4444' },
       RETRY: { text: 'Đang thử lại', color: '#F59E0B' },
       INIT: { text: 'Khởi tạo', color: '#6366F1' },
+      REFUND_PENDING: { text: 'Đang chờ hoàn tiền', color: '#F59E0B' },
+      REFUNDED: { text: 'Đã hoàn tiền', color: '#10B981' },
     };
     return labels[status] || { text: status || 'Chưa thanh toán', color: '#999' };
   };
@@ -511,18 +515,33 @@ export default function RideDetailScreen() {
           <View style={styles.driverRow}>
             <View style={styles.avatarWrapper}>
               <Text style={styles.avatarText}>
-                {(booking.assignedDriverId || booking.status === 'CANCELLED') ? 'TX' : '?'}
+                {driverInfo?.hasDriver ? 'TX' : '?'}
               </Text>
             </View>
             <View style={styles.driverInfoWrapper}>
-              {(booking.assignedDriverId || booking.status === 'CANCELLED') ? (
+              {driverInfo?.hasDriver ? (
                 <>
-                  <Text style={styles.driverName}>Tài xế Nguyễn Chí Thiện</Text>
-                  <Text style={styles.driverSubText}>Mã số: TX-{(booking.assignedDriverId || '04c0a5c2').substring(0, 8).toUpperCase()}</Text>
-                  <View style={styles.driverRatingRow}>
-                    <Text style={styles.driverRatingText}>4.9 ⭐</Text>
-                    <Text style={styles.driverTripsText}>(320 chuyến đi)</Text>
-                  </View>
+                  <Text style={styles.driverName}>
+                    {driverInfo.fullName || 'Tài xế đã nhận chuyến'}
+                  </Text>
+                  {driverInfo.shortId && (
+                    <Text style={styles.driverSubText}>Mã số: {driverInfo.shortId}</Text>
+                  )}
+                  {/* Only show rating if backend provides it */}
+                  {driverInfo.averageRating != null && driverInfo.totalCompletedRides != null && (
+                    <View style={styles.driverRatingRow}>
+                      <Text style={styles.driverRatingText}>{driverInfo.averageRating.toFixed(1)} ⭐</Text>
+                      <Text style={styles.driverTripsText}>({driverInfo.totalCompletedRides} chuyến đi)</Text>
+                    </View>
+                  )}
+                  {/* Only show vehicle info if backend provides it */}
+                  {driverInfo.vehiclePlate && (
+                    <Text style={styles.driverSubText}>
+                      Biển số: {driverInfo.vehiclePlate}
+                      {driverInfo.vehicleColor ? ` • ${driverInfo.vehicleColor}` : ''}
+                      {driverInfo.vehicleModel ? ` • ${driverInfo.vehicleModel}` : ''}
+                    </Text>
+                  )}
                 </>
               ) : (
                 <>
@@ -1092,6 +1111,13 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     paddingHorizontal: 32,
+  },
+  emptyText: {
+    fontSize: 16,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginTop: 16,
+    lineHeight: 24,
   },
   // ── Pricing breakdown styles ────────────────────────────────
   surgeRow: {

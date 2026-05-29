@@ -21,6 +21,12 @@ export const SOCKET_URL = isTunnel
         : `wss://${IP_ADDRESS}`)
   : `http://${IP_ADDRESS}:${SOCKET_PORT}`;
 
+// Ride Socket — now proxied through API Gateway at /ride/socket.io
+// No more separate ngrok tunnel or direct port 9095 needed.
+// The gateway rewrites /ride/socket.io/** → ride-service:9095/socket.io/**
+export const RIDE_SOCKET_URL = BASE_URL;
+export const RIDE_SOCKET_PATH = '/ride/socket.io';
+
 const api = axios.create({
   baseURL: BASE_URL,
   timeout: 30000,

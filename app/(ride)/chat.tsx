@@ -211,7 +211,7 @@ export default function ChatScreen() {
           <ChevronLeft size={24} color="#333" />
         </TouchableOpacity>
         <View style={styles.headerInfo}>
-          <Text style={styles.headerTitle}>{driverName || 'Tài xế Nguyễn Chí Thiện'}</Text>
+          <Text style={styles.headerTitle}>{driverName || 'Tài xế'}</Text>
           <View style={styles.statusIndicator}>
             <View style={styles.onlineDot} />
             <Text style={styles.onlineText}>Đang trực tuyến</Text>

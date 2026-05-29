@@ -244,7 +244,10 @@ export default function AIChatScreen() {
       dropoffCoords: { latitude: dropoffCoords.lat, longitude: dropoffCoords.lng },
       fare,
       vehicle,
-      payment: 'CASH' as const
+      payment: 'CASH' as const,
+      estimateId: undefined as string | undefined,
+      quotePayloadHash: undefined as string | undefined,
+      surgeMultiplier: undefined as number | undefined,
     };
   };
 

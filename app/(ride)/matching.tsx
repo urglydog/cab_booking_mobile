@@ -7,6 +7,7 @@ import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock, MessageSquare } fro
 import { useRouter, useLocalSearchParams } from 'expo-router';
 import { useSocket } from '@/hooks/useSocket';
 import { usePayment } from '@/hooks/usePayment';
+import { useRideSocket } from '@/hooks/useRideSocket';
 import { Colors } from '@/constants/Colors';
 import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
@@ -19,19 +20,39 @@ const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
   return roomId === bookingId || roomId === `ROOM_${bookingId}`;
 };
 
-const inferRideUiStatus = (payload: any) => {
-  const rawStatus = String(payload?.status ?? payload?.rideStatus ?? payload?.type ?? payload?.eventType ?? '').toUpperCase();
-  const title = String(payload?.title ?? '').toLowerCase();
-  const message = String(payload?.message ?? '').toLowerCase();
+/**
+ * Valid BookingStatus enum values from backend.
+ * Source: booking-service/.../enums/BookingStatus.java
+ */
+const BOOKING_STATUS_SET = new Set([
+  'CREATED', 'PENDING_PAYMENT', 'MATCHING', 'ASSIGNED',
+  'ACCEPTED', 'PICKUP', 'IN_PROGRESS', 'COMPLETED', 'CANCELLED',
+]);
 
-  if (['MATCHING', 'CREATED'].includes(rawStatus) || message.includes('tìm tài xế')) return 'FINDING';
-  if (rawStatus === 'ASSIGNED') return 'FOUND';
-  if (rawStatus === 'ACCEPTED' || rawStatus === 'PICKUP' || title.includes('đã đến') || message.includes('đã đến điểm đón') || message.includes('arrived')) return 'ARRIVING';
-  if (rawStatus === 'IN_PROGRESS' || rawStatus === 'STARTED' || title.includes('bắt đầu') || message.includes('bắt đầu') || message.includes('started')) return 'STARTED';
-  if (rawStatus === 'COMPLETED' || rawStatus === 'FINISHED' || title.includes('hoàn thành') || message.includes('hoàn thành') || message.includes('completed')) return 'COMPLETED';
-  if (rawStatus === 'PAID') return 'PAID';
-  if (rawStatus === 'CANCELLED' || title.includes('hủy') || message.includes('hủy')) return 'CANCELLED';
-  return undefined;
+/**
+ * Map backend BookingStatus enum to internal UI status.
+ * Only accepts valid BookingStatus values — no Vietnamese text parsing.
+ * For notification payloads (which lack booking status), returns undefined
+ * and lets the 5s polling interval handle the status update.
+ */
+const inferRideUiStatus = (payload: any) => {
+  const rawStatus = String(payload?.status ?? '').toUpperCase();
+
+  // Only process if status is a valid BookingStatus enum value
+  if (!BOOKING_STATUS_SET.has(rawStatus)) return undefined;
+
+  switch (rawStatus) {
+    case 'CREATED':
+    case 'MATCHING':      return 'FINDING';
+    case 'PENDING_PAYMENT': return 'PENDING_PAYMENT';
+    case 'ASSIGNED':      return 'FOUND';
+    case 'ACCEPTED':
+    case 'PICKUP':        return 'ARRIVING';
+    case 'IN_PROGRESS':   return 'STARTED';
+    case 'COMPLETED':     return 'COMPLETED';
+    case 'CANCELLED':     return 'CANCELLED';
+    default:              return undefined;
+  }
 };
 
 // Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
@@ -91,11 +112,16 @@ export default function MatchingScreen() {
 
   const { socket } = useSocket();
   const { initPayment, startPolling, stopPolling } = usePayment();
+  const { isConnected: isRideConnected, driverLocation } = useRideSocket(bookingId);
 
-  const [bookingStatus, setBookingStatus] = useState<string>('CREATED');
+  // If prepaid method, start in PENDING_PAYMENT to avoid fake "finding driver" flash
+  const [bookingStatus, setBookingStatus] = useState<string>(
+    paymentMethod && paymentMethod !== 'CASH' ? 'PENDING_PAYMENT' : 'CREATED'
+  );
   const [bookingInfo, setBookingInfo] = useState<any>(null);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [matchedDriver, setMatchedDriver] = useState<any>(null);
+  const [elapsedSeconds, setElapsedSeconds] = useState(0);
 
   useEffect(() => {
     const driverId = bookingInfo?.assignedDriverId ?? bookingInfo?.driverId;
@@ -154,6 +180,12 @@ export default function MatchingScreen() {
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
 
+  // ── Derived UI flags (must be declared before useEffects that reference them) ──
+  const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
+  const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
+  const isCancelled = bookingStatus === 'CANCELLED';
+  const isSurge = parsedSurge > 1.0;
+
   // ── Poll booking status ──────────────────────────────────────
   useEffect(() => {
     if (!bookingId) return;
@@ -169,15 +201,13 @@ export default function MatchingScreen() {
           if (inferredStatus === 'COMPLETED') {
             handleRideCompleted({ ...bookingInfo, ...booking });
             return;
-          } else if (inferredStatus === 'CANCELLED' || inferredStatus === 'PAID') {
-            router.replace('/(tabs)/explore');
+          } else if (inferredStatus === 'CANCELLED') {
+            setBookingStatus('CANCELLED');
             return;
           } else if (inferredStatus) {
             setBookingStatus(inferredStatus);
-          } else if (booking.status === 'PENDING_PAYMENT') {
-            // VNPay: booking waits for online payment before matching starts
-            setBookingStatus('PENDING_PAYMENT');
           } else if (booking.status) {
+            // Fallback: use raw BookingStatus if inferRideUiStatus didn't map it
             setBookingStatus(booking.status);
           }
         }
@@ -200,33 +230,48 @@ export default function MatchingScreen() {
     return () => { socket.emit('leave_room', bookingId); };
   }, [socket, bookingId]);
 
+  // ── Elapsed timer for FINDING/CREATED status ──────────────────
+  useEffect(() => {
+    if (!isFinding) return;
+    setElapsedSeconds(0);
+    const timer = setInterval(() => setElapsedSeconds(prev => prev + 1), 1000);
+    return () => clearInterval(timer);
+  }, [isFinding]);
+
   useEffect(() => {
     if (!socket) return;
 
+    /**
+     * When a notification arrives, re-fetch the booking to get the real
+     * BookingStatus from the backend (notifications don't carry booking status).
+     * This replaces the old Vietnamese text parsing approach.
+     */
     const handleNotification = (data: any) => {
       if (!isRoomUpdateForBooking(data, bookingId as string)) return;
 
-      const inferredStatus = inferRideUiStatus(data);
-      if (!inferredStatus) return;
+      // Re-fetch booking to get actual BookingStatus
+      api.get(`/api/v1/bookings/${bookingId}`)
+        .then(res => {
+          if (!res.data?.result) return;
+          const freshBooking = res.data.result;
+          setBookingInfo(freshBooking);
 
-      if (inferredStatus === 'COMPLETED') {
-        setBookingStatus('COMPLETED');
-        if (bookingInfo) handleRideCompleted({ ...bookingInfo, ...data });
-      } else if (inferredStatus === 'PAID') {
-        setBookingStatus('PAID');
-        router.replace('/(tabs)/explore');
-      } else if (inferredStatus === 'CANCELLED') {
-        router.replace('/(tabs)/explore');
-      } else {
-        setBookingStatus(inferredStatus);
-      }
+          const inferredStatus = inferRideUiStatus(freshBooking);
+          if (inferredStatus === 'COMPLETED') {
+            setBookingStatus('COMPLETED');
+            handleRideCompleted({ ...bookingInfo, ...freshBooking });
+          } else if (inferredStatus === 'CANCELLED') {
+            setBookingStatus('CANCELLED');
+          } else if (inferredStatus) {
+            setBookingStatus(inferredStatus);
+          }
+        })
+        .catch(() => {});
     };
 
     socket.on('new_notification', handleNotification);
-    socket.on('booking_status_update', handleNotification);
     return () => {
       socket.off('new_notification', handleNotification);
-      socket.off('booking_status_update', handleNotification);
     };
   }, [socket, bookingId, bookingInfo]);
 
@@ -239,7 +284,7 @@ export default function MatchingScreen() {
     const fareAmount = booking.finalFare ?? booking.estimatedFare ?? parsedFare ?? 0;
 
     if (payMethod === 'CASH' || ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'].includes(payMethod)) {
-      setBookingStatus('PAID');
+      setBookingStatus('COMPLETED');
       stopPolling?.();
       router.replace({
         pathname: '/(review)/review',
@@ -305,7 +350,7 @@ export default function MatchingScreen() {
       case 'ARRIVING':       return 'Tài xế đang đến';
       case 'STARTED':        return 'Chuyến đi đã bắt đầu';
       case 'COMPLETED':      return 'Chuyến đi hoàn thành';
-      case 'PAID':           return 'Đã thanh toán';
+      case 'CANCELLED':      return 'Chuyến đi đã bị hủy';
       default:               return 'Đang cập nhật...';
     }
   };
@@ -322,13 +367,10 @@ export default function MatchingScreen() {
       case 'ARRIVING':       return <Text style={{ fontSize: 16 }}>🚗</Text>;
       case 'STARTED':        return <Text style={{ fontSize: 16 }}>📍</Text>;
       case 'COMPLETED':      return <Text style={{ fontSize: 16 }}>✅</Text>;
+      case 'CANCELLED':      return <Text style={{ fontSize: 16 }}>❌</Text>;
       default:               return <ActivityIndicator size="small" color={Colors.light.primary} />;
     }
   };
-
-  const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
-  const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
-  const isSurge   = parsedSurge > 1.0;
 
   return (
     <SafeAreaView style={styles.container}>
@@ -376,6 +418,18 @@ export default function MatchingScreen() {
             strokeColor={Colors.light.primary}
             strokeWidth={4}
           />
+          {/* Driver location marker (Phase 3: Ride GPS Socket Tracking) */}
+          {driverLocation && (
+            <Marker
+              coordinate={{
+                latitude: driverLocation.latitude,
+                longitude: driverLocation.longitude,
+              }}
+              title="Tài xế"
+              description="Vị trí hiện tại của tài xế"
+              pinColor="#3B82F6"
+            />
+          )}
         </MapView>
 
         {/* Status Card */}
@@ -558,6 +612,11 @@ export default function MatchingScreen() {
               <Text style={styles.findingSubtext}>
                 Hệ thống đang kết nối bạn với tài xế gần nhất
               </Text>
+              {elapsedSeconds > 0 && (
+                <Text style={styles.elapsedText}>
+                  {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
+                </Text>
+              )}
               <TouchableOpacity
                 style={styles.cancelButton}
                 onPress={async () => {
@@ -570,6 +629,29 @@ export default function MatchingScreen() {
                 }}
               >
                 <Text style={styles.cancelText}>Hủy chuyến</Text>
+              </TouchableOpacity>
+            </View>
+          )}
+
+          {/* ── Cancelled ────────────────────────────────── */}
+          {isCancelled && (
+            <View style={styles.cancelledContainer}>
+              <Text style={{ fontSize: 32, marginBottom: 8 }}>🚫</Text>
+              <Text style={styles.cancelledTitle}>Chuyến đi đã bị hủy</Text>
+              <Text style={styles.cancelledSubtext}>
+                Chuyến đi của bạn đã bị hủy. Bạn có thể đặt lại hoặc quay về trang chủ.
+              </Text>
+              <TouchableOpacity
+                style={[styles.cancelledButton, { backgroundColor: Colors.light.primary }]}
+                onPress={() => router.replace('/(ride)/booking')}
+              >
+                <Text style={styles.cancelledButtonText}>Đặt lại chuyến</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={styles.cancelledHomeButton}
+                onPress={() => router.replace('/(tabs)')}
+              >
+                <Text style={styles.cancelledHomeButtonText}>Về trang chủ</Text>
               </TouchableOpacity>
             </View>
           )}
@@ -634,44 +716,6 @@ const styles = StyleSheet.create({
   findingSubtext: {
     fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 20,
   },
-  chatButton: {
-    alignSelf: 'center',
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
-    borderRadius: 999,
-    backgroundColor: '#EFF6FF',
-    marginBottom: 10,
-  },
-  chatButtonText: {
-    color: '#2563EB',
-    fontWeight: '700',
-    fontSize: 13,
-  },
-  cancelButton: { paddingVertical: 10, paddingHorizontal: 20 },
-  cancelText:  { color: '#FF4444', fontWeight: 'bold', fontSize: 15 },
-  paymentLoadingOverlay: {
-    marginTop: 16, alignItems: 'center', padding: 16,
-    backgroundColor: '#F9FAFB', borderRadius: 12, gap: 8,
-  },
-  paymentLoadingText: { fontSize: 14, color: Colors.light.primary, fontWeight: '600' },
-  vnpayContainer: { alignItems: 'center', paddingVertical: 16, gap: 12 },
-  vnpaySubtext: {
-    fontSize: 14, color: '#AA2B52', textAlign: 'center', fontWeight: '600',
-  },
-  vnpayButton: {
-    backgroundColor: '#AA2B52',
-    paddingVertical: 14,
-    paddingHorizontal: 32,
-    borderRadius: 16,
-    width: '100%',
-    alignItems: 'center',
-  },
-  vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
-  vnpayCancelButton: { paddingVertical: 8 },
-  vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
   driverCard: {
     padding: 16,
     backgroundColor: '#F9FAFB',
@@ -751,4 +795,40 @@ const styles = StyleSheet.create({
     fontWeight: 'bold',
     fontSize: 13,
   },
+  elapsedText: {
+    fontSize: 22, fontWeight: '800', color: '#F59E0B',
+    textAlign: 'center', marginBottom: 12, fontVariant: ['tabular-nums'],
+  },
+  cancelButton: { paddingVertical: 10, paddingHorizontal: 20 },
+  cancelText:  { color: '#FF4444', fontWeight: 'bold', fontSize: 15 },
+  paymentLoadingOverlay: {
+    marginTop: 16, alignItems: 'center', padding: 16,
+    backgroundColor: '#F9FAFB', borderRadius: 12, gap: 8,
+  },
+  paymentLoadingText: { fontSize: 14, color: Colors.light.primary, fontWeight: '600' },
+  vnpayContainer: { alignItems: 'center', paddingVertical: 16, gap: 12 },
+  vnpaySubtext: {
+    fontSize: 14, color: '#AA2B52', textAlign: 'center', fontWeight: '600',
+  },
+  vnpayButton: {
+    backgroundColor: '#AA2B52',
+    paddingVertical: 14,
+    paddingHorizontal: 32,
+    borderRadius: 16,
+    width: '100%',
+    alignItems: 'center',
+  },
+  vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  vnpayCancelButton: { paddingVertical: 8 },
+  vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
+  cancelledContainer: { alignItems: 'center', paddingVertical: 20, gap: 4 },
+  cancelledTitle: { fontSize: 18, fontWeight: '800', color: '#EF4444', marginBottom: 4 },
+  cancelledSubtext: { fontSize: 14, color: '#6B7280', textAlign: 'center', marginBottom: 16, lineHeight: 20 },
+  cancelledButton: {
+    paddingVertical: 14, paddingHorizontal: 32,
+    borderRadius: 16, width: '100%', alignItems: 'center',
+  },
+  cancelledButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
+  cancelledHomeButton: { paddingVertical: 10 },
+  cancelledHomeButtonText: { color: '#6B7280', fontSize: 14, fontWeight: '600' },
 });
