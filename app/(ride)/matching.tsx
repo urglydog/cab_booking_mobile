@@ -295,6 +295,7 @@ export default function MatchingScreen() {
   // ── Derived UI flags (must be declared before useEffects that reference them) ──
   const isActivelySearching = bookingStatus === 'FINDING' || bookingStatus === 'CREATED';
   const isPendingPayment = bookingStatus === 'PENDING_PAYMENT';
+  const isCancelled = bookingStatus === 'CANCELLED';
   const isSurge = parsedSurge > 1.0;
 
   // ── Poll booking status ──────────────────────────────────────
@@ -910,6 +911,61 @@ const styles = StyleSheet.create({
   vnpayButtonText: { color: '#fff', fontSize: 16, fontWeight: '800' },
   vnpayCancelButton: { paddingVertical: 8 },
   vnpayCancelText: { color: '#EF4444', fontSize: 14, fontWeight: '600' },
+  cancelledContainer: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 24,
+    backgroundColor: '#FFF',
+    borderRadius: 20,
+    padding: 20,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: '#FECACA',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 6 },
+    shadowOpacity: 0.12,
+    shadowRadius: 16,
+    elevation: 8,
+  },
+  cancelledTitle: {
+    fontSize: 18,
+    fontWeight: '800',
+    color: '#991B1B',
+    marginBottom: 8,
+    textAlign: 'center',
+  },
+  cancelledSubtext: {
+    fontSize: 14,
+    lineHeight: 20,
+    color: '#6B7280',
+    textAlign: 'center',
+    marginBottom: 16,
+  },
+  cancelledButton: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 13,
+    borderRadius: 12,
+    marginBottom: 10,
+  },
+  cancelledButtonText: {
+    color: '#FFF',
+    fontSize: 15,
+    fontWeight: '800',
+  },
+  cancelledHomeButton: {
+    width: '100%',
+    alignItems: 'center',
+    paddingVertical: 12,
+    borderRadius: 12,
+    backgroundColor: '#F3F4F6',
+  },
+  cancelledHomeButtonText: {
+    color: '#374151',
+    fontSize: 14,
+    fontWeight: '700',
+  },
   driverCard: {
     padding: 16,
     backgroundColor: '#F9FAFB',

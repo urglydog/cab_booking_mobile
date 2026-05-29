@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from 'react';
+import React, { useCallback, useEffect, useState, useRef } from 'react';
 import {
   StyleSheet,
   View,
@@ -22,17 +22,64 @@ import {
   canRetryPayment,
   parsePaymentCallbackUrl,
 } from '@/services/paymentService';
+import api from '@/services/api';
+
+const PAYMENT_SUCCESS_STATUSES = new Set(['SUCCESS', 'COMPLETED', 'PAID']);
+const PAYMENT_FAILED_STATUSES = new Set(['FAILED_FINAL', 'FAILED', 'CANCELLED']);
+const BOOKING_WAITING_PAYMENT_STATUSES = new Set(['PENDING_PAYMENT']);
+const BOOKING_READY_STATUSES = new Set(['CREATED', 'MATCHING', 'ASSIGNED', 'ACCEPTED', 'PICKUP', 'IN_PROGRESS']);
+
+const isPaymentSuccessStatus = (status?: string) => PAYMENT_SUCCESS_STATUSES.has(String(status ?? '').toUpperCase());
+const isPaymentFailedStatus = (status?: string) => PAYMENT_FAILED_STATUSES.has(String(status ?? '').toUpperCase());
+const isRenderableQrUrl = (url?: string) => /^https?:\/\//i.test(url ?? '') || String(url ?? '').startsWith('data:image/');
 
 export default function PaymentScreen() {
   const router = useRouter();
   const { transactionId, bookingId, amount, paymentMethod } = useLocalSearchParams();
-  const { isLoading, startPolling, stopPolling } = usePayment();
+  const { isLoading, stopPolling } = usePayment();
 
   const [status, setStatus] = useState<PaymentStatus>('PENDING');
   const [isPolling, setIsPolling] = useState(false);
   const [isFetchingPayment, setIsFetchingPayment] = useState(false);
   const [paymentData, setPaymentData] = useState<PaymentInitResponse | null>(null);
   const pollingIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const autoOpenedTransactionRef = useRef<string | null>(null);
+  const isOpeningGatewayRef = useRef(false);
+
+  const goToMatching = useCallback((targetBookingId?: string) => {
+    router.replace({
+      pathname: '/(ride)/matching',
+      params: { bookingId: (targetBookingId || bookingId) as string },
+    });
+  }, [bookingId, router]);
+
+  const checkBookingReadyForMatching = useCallback(async () => {
+    if (!bookingId) return false;
+
+    try {
+      const response = await api.get(`/api/v1/bookings/${bookingId}`);
+      const booking = response.data?.result ?? response.data;
+      const bookingStatus = String(booking?.status ?? '').toUpperCase();
+      console.log(`[PaymentScreen] Booking ${bookingId} status: ${bookingStatus || 'UNKNOWN'}`);
+
+      if (BOOKING_READY_STATUSES.has(bookingStatus) || (bookingStatus && !BOOKING_WAITING_PAYMENT_STATUSES.has(bookingStatus) && bookingStatus !== 'CANCELLED')) {
+        console.log(`[PaymentScreen] Booking ${bookingId} is ${bookingStatus}, navigating to matching`);
+        goToMatching(booking?.id);
+        return true;
+      }
+
+      if (bookingStatus === 'CANCELLED') {
+        router.replace('/(tabs)/explore');
+        return true;
+      }
+    } catch (err: any) {
+      if (err?.response?.status !== 404) {
+        console.log('[PaymentScreen] Could not check booking status:', err?.message);
+      }
+    }
+
+    return false;
+  }, [bookingId, goToMatching, router]);
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 1: Ensure we have a transactionId. If not, init directly.
@@ -62,7 +109,7 @@ export default function PaymentScreen() {
         }
       })();
     }
-  }, [transactionId, bookingId, amount, paymentMethod, isFetchingPayment]);
+  }, [transactionId, bookingId, amount, paymentMethod, isFetchingPayment, router]);
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 2: Fetch current payment state and start polling.
@@ -81,16 +128,14 @@ export default function PaymentScreen() {
       if (cancelled) return;
 
       if (payment) {
+        console.log(`[PaymentScreen] Initial payment ${payment.transactionId} status: ${payment.status}`);
         setPaymentData(payment);
         setStatus(payment.status as PaymentStatus);
 
-        if (payment.status === 'SUCCESS') {
-          router.replace({
-            pathname: '/(ride)/matching',
-            params: { bookingId: bookingId as string },
-          });
+        if (isPaymentSuccessStatus(payment.status)) {
+          goToMatching(payment.bookingId);
           return;
-        } else if (payment.status === 'FAILED_FINAL') {
+        } else if (isPaymentFailedStatus(payment.status)) {
           router.replace({
             pathname: '/(payment)/payment-failed',
             params: {
@@ -103,24 +148,29 @@ export default function PaymentScreen() {
         }
       }
 
+      if (await checkBookingReadyForMatching()) return;
+
       // Start polling for status updates
       setIsPolling(true);
 
       const pollInterval = setInterval(async () => {
         const updated = await PaymentService.getPaymentStatus(transactionId as string);
-        if (!updated || cancelled) return;
+        if (cancelled) return;
 
+        if (!updated) {
+          await checkBookingReadyForMatching();
+          return;
+        }
+
+        console.log(`[PaymentScreen] Polled payment ${updated.transactionId} status: ${updated.status}`);
         setPaymentData(updated);
         setStatus(updated.status as PaymentStatus);
 
-        if (updated.status === 'SUCCESS') {
+        if (isPaymentSuccessStatus(updated.status)) {
           clearInterval(pollInterval);
           setIsPolling(false);
-          router.replace({
-            pathname: '/(ride)/matching',
-            params: { bookingId: bookingId as string },
-          });
-        } else if (updated.status === 'FAILED_FINAL') {
+          goToMatching(updated.bookingId);
+        } else if (isPaymentFailedStatus(updated.status)) {
           clearInterval(pollInterval);
           setIsPolling(false);
           router.replace({
@@ -131,6 +181,8 @@ export default function PaymentScreen() {
               reason: 'Thanh toán thất bại sau nhiều lần thử',
             },
           });
+        } else {
+          await checkBookingReadyForMatching();
         }
       }, 3000);
 
@@ -145,15 +197,18 @@ export default function PaymentScreen() {
         pollingIntervalRef.current = null;
       }
     };
-  }, [transactionId, bookingId]);
+  }, [transactionId, bookingId, checkBookingReadyForMatching, goToMatching, router]);
 
   // ────────────────────────────────────────────────────────────────────────────
   // Step 3: Auto-open payment gateway when payUrl/deeplink is available
   // VNPay: openAuthSessionAsync chờ redirect trước khi resolve
   // MoMo/ZaloPay: deeplink mở app riêng
   // ────────────────────────────────────────────────────────────────────────────
-  const handleOpenGateway = async () => {
+  const handleOpenGateway = useCallback(async (manual = true) => {
     if (!paymentData) return;
+    if (isOpeningGatewayRef.current) return;
+
+    isOpeningGatewayRef.current = true;
     try {
       const gatewayResult = await PaymentService.openPaymentGateway(paymentData);
 
@@ -161,10 +216,7 @@ export default function PaymentScreen() {
       if (gatewayResult.callbackUrl) {
         const callback = parsePaymentCallbackUrl(gatewayResult.callbackUrl);
         if (callback?.status === 'success') {
-          router.replace({
-            pathname: '/(ride)/matching',
-            params: { bookingId: (callback.bookingId || bookingId) as string },
-          });
+          goToMatching(callback.bookingId as string | undefined);
           return;
         } else if (callback?.status === 'failed' || callback?.status === 'cancelled') {
           router.replace({
@@ -182,19 +234,28 @@ export default function PaymentScreen() {
       // Không có callbackUrl -> browser đã mở, chờ redirect và app quay lại
       // (Polling sẽ tự động phát hiện thanh toán thành công)
       console.log('[PaymentScreen] Browser opened, waiting for payment redirect...');
+      await checkBookingReadyForMatching();
     } catch (err: any) {
-      Alert.alert('Lỗi', err?.message || 'Không thể mở cổng thanh toán');
+      if (manual) {
+        Alert.alert('Lỗi', err?.message || 'Không thể mở cổng thanh toán');
+      } else {
+        console.warn('[PaymentScreen] Auto-open gateway failed:', err?.message || err);
+      }
+    } finally {
+      isOpeningGatewayRef.current = false;
     }
-  };
+  }, [bookingId, checkBookingReadyForMatching, goToMatching, paymentData, router, transactionId]);
 
   // Auto-open gateway when payment info is loaded with a payUrl/deeplink/deeplinkWallet
   useEffect(() => {
     if (paymentData?.paymentMethod === 'SEPAY') return; // Don't auto-open browser for SePay (VietQR code)
+    if (!paymentData?.transactionId || autoOpenedTransactionRef.current === paymentData.transactionId) return;
     if (paymentData?.payUrl || paymentData?.deeplink || paymentData?.deeplinkWallet) {
-      const timer = setTimeout(handleOpenGateway, 800);
+      autoOpenedTransactionRef.current = paymentData.transactionId;
+      const timer = setTimeout(() => handleOpenGateway(false), 800);
       return () => clearTimeout(timer);
     }
-  }, [paymentData?.payUrl, paymentData?.deeplink, paymentData?.deeplinkWallet, paymentData?.paymentMethod]);
+  }, [handleOpenGateway, paymentData?.payUrl, paymentData?.deeplink, paymentData?.deeplinkWallet, paymentData?.paymentMethod, paymentData?.transactionId]);
 
   const handleCopyTransactionId = () => {
     Share.share({ message: `Mã giao dịch: ${transactionId}` });
@@ -233,9 +294,9 @@ export default function PaymentScreen() {
 
   const effectiveMethod = paymentData?.paymentMethod || (paymentMethod as string) || 'VNPAY';
   const isPending = isPolling || isLoading;
-  const isSuccess = status === 'SUCCESS';
-  const isFailed = status === 'FAILED' || status === 'FAILED_FINAL';
-  const showQr = paymentData?.qrCodeUrl;
+  const isSuccess = isPaymentSuccessStatus(status);
+  const isFailed = isPaymentFailedStatus(status);
+  const showQr = isRenderableQrUrl(paymentData?.qrCodeUrl) ? paymentData?.qrCodeUrl : undefined;
   const showGatewayButton = paymentData?.deeplink || paymentData?.deeplinkWallet || paymentData?.payUrl;
 
   return (
@@ -285,7 +346,7 @@ export default function PaymentScreen() {
               <View style={styles.qrMainContainer}>
                 <View style={styles.qrWrapper}>
                   <Image
-                    source={{ uri: paymentData.qrCodeUrl }}
+                    source={{ uri: showQr }}
                     style={styles.qrImageMain}
                     resizeMode="contain"
                   />
@@ -306,7 +367,7 @@ export default function PaymentScreen() {
 
                 {/* Open App Button */}
                 {showGatewayButton && (
-                  <TouchableOpacity style={styles.openGatewayButton} onPress={handleOpenGateway}>
+                  <TouchableOpacity style={styles.openGatewayButton} onPress={() => handleOpenGateway(true)}>
                     <Text style={styles.openGatewayText}>
                       Mở ứng dụng {getMethodLabel(effectiveMethod)}
                     </Text>
