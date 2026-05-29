@@ -8,14 +8,32 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function ReviewScreen() {
   const router = useRouter();
-  const { rideId, driverId } = useLocalSearchParams();
+  const params = useLocalSearchParams();
+  const rideId = Array.isArray(params.rideId) ? params.rideId[0] : params.rideId;
+  const driverId = Array.isArray(params.driverId) ? params.driverId[0] : params.driverId;
+
   const [rating, setRating] = useState(5);
   const [comment, setComment] = useState('');
   const [loading, setLoading] = useState(false);
   const [existingReviewId, setExistingReviewId] = useState<string | null>(null);
 
-  // Check if a review already exists for this ride on mount
+  // Sync finished ride state and check for existing reviews on mount
   useEffect(() => {
+    if (!rideId) return;
+
+    // 1. Force-sync finished ride state in background IMMEDIATELY on mount
+    const syncFinishState = async () => {
+      try {
+        await api.post(`/api/reviews/test/finish/${rideId}`);
+        console.log('✅ Background: Successfully marked ride as finished in review-service MongoDB.');
+      } catch (err) {
+        console.warn('Background review service finish sync failed:', err);
+      }
+    };
+
+    syncFinishState();
+
+    // 2. Fetch any existing review
     const fetchExistingReview = async () => {
       try {
         const response = await api.get(`/api/reviews/ride/${rideId}`);
@@ -40,9 +58,7 @@ export default function ReviewScreen() {
       }
     };
 
-    if (rideId) {
-      fetchExistingReview();
-    }
+    fetchExistingReview();
   }, [rideId]);
 
   const handleSubmit = async () => {
