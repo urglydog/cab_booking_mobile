@@ -13,6 +13,7 @@ import api from '@/services/api';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
+import { fetchRoute, generateRouteCoords } from '@/services/mapService';
 
 const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
   if (!bookingId) return true;
@@ -78,42 +79,7 @@ const inferRideUiStatus = (payload: any) => {
   return undefined;
 };
 
-// Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
-const generateRouteCoords = (
-  start: { latitude: number; longitude: number },
-  end: { latitude: number; longitude: number }
-) => {
-  const coords = [start];
-  const dLat = end.latitude - start.latitude;
-  const dLng = end.longitude - start.longitude;
-
-  // Actual perpendicular normal vector of the start-end segment
-  const perpLat = -dLng;
-  const perpLng = dLat;
-
-  const numSteps = 8;
-  for (let i = 1; i < numSteps; i++) {
-    const ratio = i / numSteps;
-    // Base linear point
-    const lat = start.latitude + dLat * ratio;
-    const lng = start.longitude + dLng * ratio;
-
-    // Multi-frequency wave using sine to create an elegant curved S-route (sin curve)
-    const wave = Math.sin(ratio * Math.PI * 2);
-
-    // Perpendicular offset scaled to 24% of the distance to give a beautiful natural curve
-    const offsetScale = 0.24;
-    const latOffset = perpLat * wave * offsetScale;
-    const lngOffset = perpLng * wave * offsetScale;
-
-    coords.push({
-      latitude: lat + latOffset,
-      longitude: lng + lngOffset,
-    });
-  }
-  coords.push(end);
-  return coords;
-};
+// Route generation utility imported from mapService
 
 export default function MatchingScreen() {
   const router = useRouter();
@@ -242,10 +208,30 @@ export default function MatchingScreen() {
   const pickupText = pickup ?? bookingInfo?.pickupLocation;
   const dropoffText = dropoff ?? bookingInfo?.dropoffLocation;
 
-  // Route polyline coordinates (beautiful curved S-route between pickup and dropoff)
-  const routeCoordinates = hasValidCoords
-    ? generateRouteCoords({ latitude: pLat, longitude: pLng }, { latitude: dLat, longitude: dLng })
-    : generateRouteCoords({ latitude: 10.822, longitude: 106.687 }, { latitude: 10.779, longitude: 106.699 });
+  // Route polyline coordinates (real driving route with curved fallback)
+  const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
+
+  useEffect(() => {
+    if (hasValidCoords) {
+      const from = { latitude: pLat, longitude: pLng };
+      const to = { latitude: dLat, longitude: dLng };
+      setRouteCoordinates(generateRouteCoords(from, to));
+
+      let isMounted = true;
+      fetchRoute(from, to).then((coords) => {
+        if (isMounted && coords && coords.length > 0) {
+          setRouteCoordinates(coords);
+        }
+      });
+      return () => {
+        isMounted = false;
+      };
+    } else {
+      const from = { latitude: 10.822, longitude: 106.687 };
+      const to = { latitude: 10.779, longitude: 106.699 };
+      setRouteCoordinates(generateRouteCoords(from, to));
+    }
+  }, [pLat, pLng, dLat, dLng, hasValidCoords]);
 
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
