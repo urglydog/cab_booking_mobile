@@ -5,6 +5,8 @@ import { MapPin } from 'lucide-react-native';
 interface AddressSuggestionItem {
   text?: string;
   place_name?: string;
+  description?: string;
+  place_id?: string;
   geometry?: { coordinates: [number, number] };
 }
 
@@ -47,10 +49,10 @@ export default function AddressSuggestions({
               <MapPin size={18} color="#6366F1" />
               <View style={styles.suggestionTextContainer}>
                 <Text style={styles.suggestionTitle} numberOfLines={1}>
-                  {item.text || (item.place_name ?? '').split(',')[0]}
+                  {item.text || (item.place_name ?? item.description ?? '').split(',')[0]}
                 </Text>
                 <Text style={styles.suggestionSubtitle} numberOfLines={1}>
-                  {item.place_name}
+                  {item.place_name ?? item.description}
                 </Text>
               </View>
             </TouchableOpacity>

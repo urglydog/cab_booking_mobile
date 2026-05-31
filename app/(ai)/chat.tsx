@@ -11,6 +11,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PricingService, calculateFallbackFare } from '@/services/pricingService';
 import { PaymentInitResponse, PaymentMethod, PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
+import { fetchRoute, generateRouteCoords } from '@/services/mapService';
 
 interface Message {
   id: string;
@@ -133,29 +134,7 @@ type BookingIntent = {
   surgeMultiplier?: number;
 };
 
-const generateRouteCoords = (
-  start: { latitude: number; longitude: number },
-  end: { latitude: number; longitude: number }
-) => {
-  const coords = [start];
-  const dLat = end.latitude - start.latitude;
-  const dLng = end.longitude - start.longitude;
-  const perpLat = -dLng;
-  const perpLng = dLat;
-  const numSteps = 8;
-  for (let i = 1; i < numSteps; i++) {
-    const ratio = i / numSteps;
-    const lat = start.latitude + dLat * ratio;
-    const lng = start.longitude + dLng * ratio;
-    const wave = Math.sin(ratio * Math.PI * 2);
-    const offsetScale = 0.24;
-    const latOffset = perpLat * wave * offsetScale;
-    const lngOffset = perpLng * wave * offsetScale;
-    coords.push({ latitude: lat + latOffset, longitude: lng + lngOffset });
-  }
-  coords.push(end);
-  return coords;
-};
+// Route generation utility imported from mapService
 
 export default function AIChatScreen() {
   const router = useRouter();
@@ -184,6 +163,36 @@ export default function AIChatScreen() {
   const [isBookingModalVisible, setIsBookingModalVisible] = useState(false);
   const [bookingDetails, setBookingDetails] = useState<BookingIntent | null>(null);
   const [confirmLoading, setConfirmLoading] = useState(false);
+  const [chatRouteCoords, setChatRouteCoords] = useState<{ latitude: number; longitude: number }[]>([]);
+
+  useEffect(() => {
+    if (!bookingDetails?.pickupCoords || !bookingDetails?.dropoffCoords) {
+      setChatRouteCoords([]);
+      return;
+    }
+    const from = bookingDetails.pickupCoords;
+    const to = bookingDetails.dropoffCoords;
+    
+    // Set fallback first
+    setChatRouteCoords(generateRouteCoords(from, to));
+
+    let isMounted = true;
+    fetchRoute(from, to).then((coords) => {
+      if (isMounted && coords && coords.length > 0) {
+        setChatRouteCoords(coords);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [
+    bookingDetails?.pickupCoords?.latitude,
+    bookingDetails?.pickupCoords?.longitude,
+    bookingDetails?.dropoffCoords?.latitude,
+    bookingDetails?.dropoffCoords?.longitude
+  ]);
 
   // Promo Selector states (Alternating modal trigger to prevent overlay block on Android/iOS)
   const [isPromoListVisible, setIsPromoListVisible] = useState(false);
@@ -265,34 +274,69 @@ export default function AIChatScreen() {
       };
     }
 
-    const MAPBOX_KEY = process.env.EXPO_PUBLIC_MAPBOX_API_KEY ?? '';
-    if (!MAPBOX_KEY) return null;
+    const GOONG_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
+    if (!GOONG_KEY) {
+      console.warn('[AI Chat] EXPO_PUBLIC_GOONG_API_KEY not configured');
+      return null;
+    }
 
     try {
-      for (const query of buildGeocodeQueries(address)) {
-        const params = new URLSearchParams({
-          access_token: MAPBOX_KEY,
-          country: 'vn',
-          limit: '3',
-          language: 'vi',
-          bbox: HCM_GEOCODE_BBOX,
-          proximity: HCM_GEOCODE_PROXIMITY,
+      console.log('[AI Chat] Resolving address with Goong:', address);
+      // Strategy 1: Use Goong AutoComplete to get the place_id, then get Details
+      const params = new URLSearchParams({
+        api_key: GOONG_KEY,
+        input: address,
+        location: '10.7769,106.7009', // HCM City Center
+        limit: '1',
+        radius: '50',
+      });
+      const response = await fetch(`https://rsapi.goong.io/Place/AutoComplete?${params.toString()}`);
+      const data = await response.json();
+      
+      const prediction = data.predictions?.[0];
+      if (prediction?.place_id) {
+        console.log('[AI Chat] AutoComplete matched place_id:', prediction.place_id);
+        const detailParams = new URLSearchParams({
+          api_key: GOONG_KEY,
+          place_id: prediction.place_id,
         });
-        const response = await fetch(
-          `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(query)}.json?${params.toString()}`
-        );
-        const data = await response.json();
-        const feature = data.features?.find((item: any) => item?.geometry?.coordinates);
-        if (!feature?.geometry?.coordinates) continue;
-        const [lng, lat] = feature.geometry.coordinates;
+        const detailRes = await fetch(`https://rsapi.goong.io/Place/Detail?${detailParams.toString()}`);
+        const detailData = await detailRes.json();
+        
+        const location = detailData.result?.geometry?.location;
+        if (location && typeof location.lat === 'number' && typeof location.lng === 'number') {
+          const finalName = detailData.result?.formatted_address ?? prediction.description ?? address;
+          console.log('[AI Chat] Resolved coordinates successfully via AutoComplete + Detail:', location);
+          return {
+            name: finalName,
+            coords: { latitude: location.lat, longitude: location.lng },
+          };
+        }
+      }
+
+      // Strategy 2: Direct Geocode fallback
+      console.log('[AI Chat] AutoComplete failed, trying direct Geocode...');
+      const geocodeParams = new URLSearchParams({
+        api_key: GOONG_KEY,
+        address: address,
+      });
+      const geocodeRes = await fetch(`https://rsapi.goong.io/Geocode?${geocodeParams.toString()}`);
+      const geocodeData = await geocodeRes.json();
+      const result = geocodeData.results?.[0];
+      const location = result?.geometry?.location;
+      if (location && typeof location.lat === 'number' && typeof location.lng === 'number') {
+        const finalName = result?.formatted_address ?? address;
+        console.log('[AI Chat] Resolved coordinates successfully via Geocode:', location);
         return {
-          name: feature.place_name ?? address,
-          coords: { latitude: lat, longitude: lng },
+          name: finalName,
+          coords: { latitude: location.lat, longitude: location.lng },
         };
       }
+
+      console.warn('[AI Chat] Goong could not geocode address:', address);
       return null;
     } catch (err) {
-      console.log('[AI Chat] Geocoding failed:', err);
+      console.error('[AI Chat] Goong Geocoding error:', err);
       return null;
     }
   };
@@ -375,7 +419,10 @@ export default function AIChatScreen() {
       dropoffCoords: dropoffPlace.coords,
       fare: Math.round(calculatedFare / 1000) * 1000,
       vehicle,
-      payment: 'CASH',
+      payment: 'CASH' as const,
+      estimateId: undefined as string | undefined,
+      quotePayloadHash: undefined as string | undefined,
+      surgeMultiplier: undefined as number | undefined,
     };
   };
 
@@ -1014,7 +1061,7 @@ export default function AIChatScreen() {
                     <Marker coordinate={bookingDetails.pickupCoords} pinColor="#10B981" title="Điểm đón" />
                     <Marker coordinate={bookingDetails.dropoffCoords} pinColor="#EF4444" title="Điểm đến" />
                     <Polyline
-                      coordinates={generateRouteCoords(bookingDetails.pickupCoords, bookingDetails.dropoffCoords)}
+                      coordinates={chatRouteCoords}
                       strokeColor="#4F46E5"
                       strokeWidth={3.5}
                     />

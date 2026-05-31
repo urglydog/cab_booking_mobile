@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   PricingService,
   FareEstimateResponse,
@@ -33,6 +33,19 @@ const PROMO_CODES = [
 
 const ESTIMATE_DEBOUNCE_MS = 1200;
 const ONLINE_PAYMENT_METHODS = ['MOMO', 'ZALOPAY', 'VNPAY', 'SEPAY'];
+const GOONG_API_BASE = 'https://rsapi.goong.io';
+const GOONG_HCM_LOCATION = '10.7769,106.7009';
+const GOONG_SEARCH_RADIUS_KM = '50';
+
+type AddressSuggestion = {
+  id?: string;
+  text?: string;
+  place_name?: string;
+  description?: string;
+  place_id?: string;
+  source?: 'local' | 'goong';
+  geometry?: { type?: string; coordinates: [number, number] };
+};
 
 const waitForPaymentByBooking = async (bookingId: string) => {
   // Attempt with exponential backoff: up to 30 attempts with growing intervals
@@ -157,6 +170,7 @@ function useDebouncedCallback<T extends (...args: any[]) => any>(
 
 export default function BookingScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const bookingInFlightRef = useRef(false);
 
   // ── Form state ──────────────────────────────────────────────
@@ -164,6 +178,30 @@ export default function BookingScreen() {
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [dropoff, setDropoff] = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // Prefill pickup & dropoff details when booking is triggered from recent destination list
+  useEffect(() => {
+    if (params) {
+      if (params.pickup) {
+        setPickup(params.pickup as string);
+      }
+      if (params.pickupLat && params.pickupLng) {
+        setPickupCoords({
+          latitude: parseFloat(params.pickupLat as string),
+          longitude: parseFloat(params.pickupLng as string),
+        });
+      }
+      if (params.dropoff) {
+        setDropoff(params.dropoff as string);
+      }
+      if (params.dropoffLat && params.dropoffLng) {
+        setDropoffCoords({
+          latitude: parseFloat(params.dropoffLat as string),
+          longitude: parseFloat(params.dropoffLng as string),
+        });
+      }
+    }
+  }, [params.pickup, params.pickupLat, params.pickupLng, params.dropoff, params.dropoffLat, params.dropoffLng]);
 
   const [vehicleTier, setVehicleTier] = useState<VehicleTier>('CAR4');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
@@ -183,7 +221,7 @@ export default function BookingScreen() {
   const [estimateExpired, setEstimateExpired] = useState(false);
 
   // ── Autocomplete state ───────────────────────────────────────
-  const [suggestions, setSuggestions] = useState<any[]>([]);
+  const [suggestions, setSuggestions] = useState<AddressSuggestion[]>([]);
   const [activeSearch, setActiveSearch] = useState<'pickup' | 'dropoff' | null>(null);
   const [searching, setSearching] = useState(false);
   const latestSearchRef = useRef(0);
@@ -228,32 +266,59 @@ export default function BookingScreen() {
     }
 
     const queryLower = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
-    const localMatches = LOCAL_FAMOUS_PLACES.filter(place => {
+    const localMatches: AddressSuggestion[] = LOCAL_FAMOUS_PLACES
+      .filter(place => {
       const placeTextNorm = place.text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
       const placeNameNorm = place.place_name.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/đ/g, 'd');
       return placeTextNorm.includes(queryLower) || placeNameNorm.includes(queryLower);
-    });
+      })
+      .map(place => ({
+        ...place,
+        source: 'local',
+        geometry: {
+          ...place.geometry,
+          coordinates: [place.geometry.coordinates[0], place.geometry.coordinates[1]],
+        },
+      }));
 
     const searchId = ++latestSearchRef.current;
     setSearching(true);
     try {
-      const MAPBOX_KEY = process.env.EXPO_PUBLIC_MAPBOX_API_KEY ?? '';
-      if (!MAPBOX_KEY) {
-        console.warn('MAPBOX_API_KEY not configured');
+      const GOONG_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
+      if (!GOONG_KEY) {
+        console.warn('EXPO_PUBLIC_GOONG_API_KEY not configured');
         if (searchId === latestSearchRef.current) setSuggestions(localMatches);
         return;
       }
 
+      const params = new URLSearchParams({
+        api_key: GOONG_KEY,
+        input: text,
+        location: GOONG_HCM_LOCATION,
+        limit: '8',
+        radius: GOONG_SEARCH_RADIUS_KM,
+        more_compound: 'true',
+      });
       const response = await fetch(
-        `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(text)}.json?access_token=${MAPBOX_KEY}&country=vn&limit=8&language=vi`
+        `${GOONG_API_BASE}/Place/AutoComplete?${params.toString()}`
       );
       const data = await response.json();
 
-      const mapboxFeatures = data.features ?? [];
-      const combined = [...localMatches];
-      mapboxFeatures.forEach((feat: any) => {
+      const goongPredictions: AddressSuggestion[] = (data.predictions ?? []).map((prediction: any) => ({
+        id: prediction.place_id,
+        text: prediction.structured_formatting?.main_text ?? prediction.description,
+        place_name: prediction.description,
+        description: prediction.description,
+        place_id: prediction.place_id,
+        source: 'goong',
+      }));
+      const combined: AddressSuggestion[] = [...localMatches];
+      goongPredictions.forEach((feat) => {
         const isDuplicate = combined.some(
-          item => item.id === feat.id || item.text.toLowerCase() === feat.text.toLowerCase()
+          item =>
+            item.id === feat.id ||
+            item.place_name?.toLowerCase() === feat.place_name?.toLowerCase() ||
+            item.text?.toLowerCase() === feat.text?.toLowerCase()
         );
         if (!isDuplicate) {
           combined.push(feat);
@@ -262,31 +327,67 @@ export default function BookingScreen() {
 
       if (searchId === latestSearchRef.current) setSuggestions(combined);
     } catch (e) {
-      console.error('Geocoding error:', e);
+      console.error('Goong autocomplete error:', e);
       if (searchId === latestSearchRef.current) setSuggestions(localMatches);
     } finally {
       if (searchId === latestSearchRef.current) setSearching(false);
     }
   };
 
-  const handleSelectSuggestion = (item: any) => {
-    const coords = {
-      latitude: item.geometry.coordinates[1],
-      longitude: item.geometry.coordinates[0],
+  const resolveSuggestionCoords = async (item: AddressSuggestion) => {
+    if (item.geometry?.coordinates) {
+      return {
+        latitude: item.geometry.coordinates[1],
+        longitude: item.geometry.coordinates[0],
+      };
+    }
+
+    if (!item.place_id) return null;
+
+    const GOONG_KEY = process.env.EXPO_PUBLIC_GOONG_API_KEY ?? '';
+    if (!GOONG_KEY) {
+      console.warn('EXPO_PUBLIC_GOONG_API_KEY not configured');
+      return null;
+    }
+
+    const params = new URLSearchParams({
+      api_key: GOONG_KEY,
+      place_id: item.place_id,
+    });
+    const response = await fetch(`${GOONG_API_BASE}/Place/Detail?${params.toString()}`);
+    const data = await response.json();
+    const location = data.result?.geometry?.location;
+    if (!location || typeof location.lat !== 'number' || typeof location.lng !== 'number') {
+      return null;
+    }
+
+    return {
+      latitude: location.lat,
+      longitude: location.lng,
     };
+  };
+
+  const handleSelectSuggestion = async (item: AddressSuggestion) => {
+    const displayName = item.place_name ?? item.description ?? item.text ?? '';
+    const coords = await resolveSuggestionCoords(item);
+    if (!coords) {
+      Alert.alert('Không lấy được tọa độ', 'Vui lòng chọn một địa điểm khác hoặc nhập địa chỉ chi tiết hơn.');
+      return;
+    }
+
     if (activeSearch === 'pickup') {
-      setPickup(item.place_name ?? item.text);
+      setPickup(displayName);
       setPickupCoords(coords);
       console.log('[Booking] Pickup selected:', {
-        name: item.place_name ?? item.text,
+        name: displayName,
         lat: coords.latitude,
         lng: coords.longitude,
       });
     } else if (activeSearch === 'dropoff') {
-      setDropoff(item.place_name ?? item.text);
+      setDropoff(displayName);
       setDropoffCoords(coords);
       console.log('[Booking] Dropoff selected:', {
-        name: item.place_name ?? item.text,
+        name: displayName,
         lat: coords.latitude,
         lng: coords.longitude,
       });

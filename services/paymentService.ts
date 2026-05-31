@@ -8,7 +8,7 @@ WebBrowser.maybeCompleteAuthSession();
 
 export type PaymentMethod = 'MOMO' | 'ZALOPAY' | 'VNPAY' | 'SEPAY' | 'CASH';
 
-export type PaymentStatus = 'INIT' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'RETRY' | 'FAILED_FINAL';
+export type PaymentStatus = 'INIT' | 'PENDING' | 'SUCCESS' | 'FAILED' | 'RETRY' | 'FAILED_FINAL' | 'REFUND_PENDING' | 'REFUNDED';
 
 export interface PaymentInitResponse {
   transactionId: string;

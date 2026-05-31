@@ -1,8 +1,9 @@
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { View, Text, StyleSheet } from 'react-native';
 import MapView, { Marker, Polyline } from 'react-native-maps';
 import { Zap, Clock } from 'lucide-react-native';
 import { getSurgeColor, getSurgeLabel } from '@/services/pricingService';
+import { fetchRoute, generateRouteCoords } from '@/services/mapService';
 
 interface MapPreviewProps {
   pickupCoords: { latitude: number; longitude: number } | null;
@@ -15,46 +16,6 @@ interface MapPreviewProps {
   distanceKm: number;
   durationMin: number;
 }
-
-// Generates a beautiful, realistic S-curve route between start and end using Perpendicular Vector & Sine wave
-const generateRouteCoords = (
-  start: { latitude: number; longitude: number },
-  end: { latitude: number; longitude: number }
-) => {
-  const coords = [start];
-  
-  const dLat = end.latitude - start.latitude;
-  const dLng = end.longitude - start.longitude;
-
-  // Actual perpendicular normal vector of the start-end segment
-  const perpLat = -dLng;
-  const perpLng = dLat;
-
-  const numSteps = 8;
-  for (let i = 1; i < numSteps; i++) {
-    const ratio = i / numSteps;
-    // Base linear point
-    const lat = start.latitude + dLat * ratio;
-    const lng = start.longitude + dLng * ratio;
-
-    // Multi-frequency wave using sine to create an elegant curved S-route (sin curve)
-    // ratio * PI * 2 creates a full wave cycle
-    const wave = Math.sin(ratio * Math.PI * 2);
-    
-    // Perpendicular offset scaled to 25% of the distance to give a beautiful natural curve
-    const offsetScale = 0.24;
-    const latOffset = perpLat * wave * offsetScale;
-    const lngOffset = perpLng * wave * offsetScale;
-
-    coords.push({
-      latitude: lat + latOffset,
-      longitude: lng + lngOffset,
-    });
-  }
-  
-  coords.push(end);
-  return coords;
-};
 
 export default function MapPreview({
   pickupCoords,
@@ -69,6 +30,30 @@ export default function MapPreview({
 }: MapPreviewProps) {
   const isSurgeActive = surgeMultiplier > 1.0;
   const fallbackPickup = pickupCoords ?? { latitude: 10.7769, longitude: 106.7009 };
+
+  const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
+
+  useEffect(() => {
+    if (!pickupCoords || !dropoffCoords) {
+      setRouteCoordinates([]);
+      return;
+    }
+
+    // Set initial fallback coordinates using generateRouteCoords
+    const fallbackCoords = generateRouteCoords(pickupCoords, dropoffCoords);
+    setRouteCoordinates(fallbackCoords);
+
+    let isMounted = true;
+    fetchRoute(pickupCoords, dropoffCoords).then((coords) => {
+      if (isMounted && coords && coords.length > 0) {
+        setRouteCoordinates(coords);
+      }
+    });
+
+    return () => {
+      isMounted = false;
+    };
+  }, [pickupCoords, dropoffCoords]);
 
   const formatCountdown = (s: number) => {
     const m = Math.floor(s / 60);
@@ -101,9 +86,9 @@ export default function MapPreview({
         {dropoffCoords && (
           <Marker coordinate={dropoffCoords} title="Điểm đến" description={dropoff} pinColor="#EF4444" />
         )}
-        {pickupCoords && dropoffCoords && (
+        {pickupCoords && dropoffCoords && routeCoordinates.length > 0 && (
           <Polyline
-            coordinates={generateRouteCoords(pickupCoords, dropoffCoords)}
+            coordinates={routeCoordinates}
             strokeColor="#4F46E5"
             strokeWidth={4.5}
             lineDashPattern={[0]}

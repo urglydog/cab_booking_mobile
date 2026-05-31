@@ -99,6 +99,10 @@ export default function LoginScreen() {
           {loading ? <ActivityIndicator color="#fff" /> : <Text style={styles.buttonText}>Log In</Text>}
         </TouchableOpacity>
 
+        <TouchableOpacity style={styles.forgotLink} onPress={() => router.push('/(auth)/forgot-password')}>
+          <Text style={styles.forgotText}>Quên mật khẩu?</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={styles.registerLink} 
           onPress={() => router.push('/register')}
@@ -178,6 +182,15 @@ const styles = StyleSheet.create({
     fontSize: 18,
     fontWeight: '800',
     letterSpacing: 0.5,
+  },
+  forgotLink: {
+    marginTop: 18,
+    alignItems: 'center',
+  },
+  forgotText: {
+    color: '#475569',
+    fontSize: 14,
+    fontWeight: '700',
   },
   registerLink: {
     marginTop: 32,
