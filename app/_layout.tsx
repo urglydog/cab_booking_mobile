@@ -121,6 +121,7 @@ export default function RootLayout() {
         <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
         <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
+        <Stack.Screen name="(auth)/forgot-password" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/matching" options={{ headerShown: false }} />
         <Stack.Screen name="(ride)/detail" options={{ headerShown: false }} />

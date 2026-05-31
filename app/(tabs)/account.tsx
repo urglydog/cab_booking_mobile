@@ -6,6 +6,7 @@ import { Colors } from '@/constants/Colors';
 import { useRouter } from 'expo-router';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import api from '@/services/api';
+import { changePassword } from '@/features/auth/services/authApi';
 
 const AVATAR_EMOJIS = ['🦊', '🐼', '🦁', '🦄', '🐱', '🦖', '🐻', '🐨', '🤖', '🐙'];
 
@@ -23,6 +24,11 @@ export default function AccountScreen() {
   const [editPhone, setEditPhone] = useState('');
   const [selectedAvatar, setSelectedAvatar] = useState('🦊');
   const [saveLoading, setSaveLoading] = useState(false);
+  const [isPasswordModalVisible, setIsPasswordModalVisible] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState('');
+  const [newPassword, setNewPassword] = useState('');
+  const [confirmPassword, setConfirmPassword] = useState('');
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   const loadUser = async () => {
     const name = await AsyncStorage.getItem('user_name');
@@ -107,6 +113,31 @@ export default function AccountScreen() {
     }
   };
 
+  const handleSavePassword = async () => {
+    if (!currentPassword || !newPassword || !confirmPassword) {
+      Alert.alert('Lỗi', 'Vui lòng nhập đầy đủ thông tin mật khẩu.');
+      return;
+    }
+    if (newPassword !== confirmPassword) {
+      Alert.alert('Lỗi', 'Mật khẩu nhập lại không khớp.');
+      return;
+    }
+
+    setPasswordLoading(true);
+    try {
+      await changePassword({ currentPassword, newPassword });
+      setCurrentPassword('');
+      setNewPassword('');
+      setConfirmPassword('');
+      setIsPasswordModalVisible(false);
+      Alert.alert('Thành công', 'Đã đổi mật khẩu thành công.');
+    } catch (error: any) {
+      Alert.alert('Lỗi', error.response?.data?.message || 'Không thể đổi mật khẩu.');
+    } finally {
+      setPasswordLoading(false);
+    }
+  };
+
   const handleLogout = async () => {
     Alert.alert(
       'Đăng xuất',
@@ -176,6 +207,7 @@ export default function AccountScreen() {
           <View style={styles.menuSection}>
             <Text style={styles.menuTitle}>Tài chính</Text>
             <MenuItem icon={<CreditCard size={20} color="#3B82F6" />} label="Phương thức thanh toán" />
+            <MenuItem icon={<ShieldCheck size={20} color="#10B981" />} label="Đổi mật khẩu" onPress={() => setIsPasswordModalVisible(true)} />
           </View>
         )}
 
@@ -282,13 +314,84 @@ export default function AccountScreen() {
           </KeyboardAvoidingView>
         </View>
       </Modal>
+
+      <Modal
+        visible={isPasswordModalVisible}
+        animationType="slide"
+        transparent={true}
+        onRequestClose={() => setIsPasswordModalVisible(false)}
+      >
+        <View style={styles.modalOverlay}>
+          <KeyboardAvoidingView
+            behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+            style={styles.modalContainer}
+          >
+            <View style={styles.modalHeader}>
+              <TouchableOpacity onPress={() => setIsPasswordModalVisible(false)} style={styles.closeBtn}>
+                <X size={24} color="#374151" />
+              </TouchableOpacity>
+              <Text style={styles.modalTitle}>Đổi mật khẩu</Text>
+              <TouchableOpacity onPress={handleSavePassword} style={styles.saveBtn} disabled={passwordLoading}>
+                <Check size={24} color={Colors.light.primary} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.modalScroll}>
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Mật khẩu hiện tại</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập mật khẩu hiện tại"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={currentPassword}
+                  onChangeText={setCurrentPassword}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Mật khẩu mới</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập mật khẩu mới"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={newPassword}
+                  onChangeText={setNewPassword}
+                />
+              </View>
+
+              <View style={styles.inputGroup}>
+                <Text style={styles.fieldLabel}>Nhập lại mật khẩu mới</Text>
+                <TextInput
+                  style={styles.textInput}
+                  placeholder="Nhập lại mật khẩu mới"
+                  placeholderTextColor="#9CA3AF"
+                  secureTextEntry
+                  value={confirmPassword}
+                  onChangeText={setConfirmPassword}
+                />
+              </View>
+
+              <TouchableOpacity
+                style={styles.saveActionButton}
+                onPress={handleSavePassword}
+                disabled={passwordLoading}
+                activeOpacity={0.8}
+              >
+                <Text style={styles.saveActionButtonText}>{passwordLoading ? 'Đang lưu...' : 'Đổi mật khẩu'}</Text>
+              </TouchableOpacity>
+            </ScrollView>
+          </KeyboardAvoidingView>
+        </View>
+      </Modal>
     </SafeAreaView>
   );
 }
 
-function MenuItem({ icon, label }: { icon: React.ReactNode, label: string }) {
+function MenuItem({ icon, label, onPress }: { icon: React.ReactNode, label: string, onPress?: () => void }) {
   return (
-    <TouchableOpacity style={styles.menuItem} onPress={() => alert('Tính năng đang được phát triển')}>
+    <TouchableOpacity style={styles.menuItem} onPress={onPress || (() => alert('Tính năng đang được phát triển'))}>
       <View style={styles.menuIconContainer}>
         {icon}
       </View>
