@@ -5,7 +5,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import api from '@/services/api';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { useRouter } from 'expo-router';
+import { useRouter, useLocalSearchParams } from 'expo-router';
 import {
   PricingService,
   FareEstimateResponse,
@@ -170,6 +170,7 @@ function useDebouncedCallback<T extends (...args: any[]) => any>(
 
 export default function BookingScreen() {
   const router = useRouter();
+  const params = useLocalSearchParams();
   const bookingInFlightRef = useRef(false);
 
   // ── Form state ──────────────────────────────────────────────
@@ -177,6 +178,30 @@ export default function BookingScreen() {
   const [pickupCoords, setPickupCoords] = useState<{ latitude: number; longitude: number } | null>(null);
   const [dropoff, setDropoff] = useState('');
   const [dropoffCoords, setDropoffCoords] = useState<{ latitude: number; longitude: number } | null>(null);
+
+  // Prefill pickup & dropoff details when booking is triggered from recent destination list
+  useEffect(() => {
+    if (params) {
+      if (params.pickup) {
+        setPickup(params.pickup as string);
+      }
+      if (params.pickupLat && params.pickupLng) {
+        setPickupCoords({
+          latitude: parseFloat(params.pickupLat as string),
+          longitude: parseFloat(params.pickupLng as string),
+        });
+      }
+      if (params.dropoff) {
+        setDropoff(params.dropoff as string);
+      }
+      if (params.dropoffLat && params.dropoffLng) {
+        setDropoffCoords({
+          latitude: parseFloat(params.dropoffLat as string),
+          longitude: parseFloat(params.dropoffLng as string),
+        });
+      }
+    }
+  }, [params.pickup, params.pickupLat, params.pickupLng, params.dropoff, params.dropoffLat, params.dropoffLng]);
 
   const [vehicleTier, setVehicleTier] = useState<VehicleTier>('CAR4');
   const [paymentMethod, setPaymentMethod] = useState('CASH');
