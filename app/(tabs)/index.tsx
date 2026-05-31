@@ -330,7 +330,19 @@ export default function HomeScreen() {
               <TouchableOpacity 
                 key={booking.id || index} 
                 style={styles.destinationItem}
-                onPress={() => router.push('/(ride)/booking')}
+                onPress={() => {
+                  router.push({
+                    pathname: '/(ride)/booking',
+                    params: {
+                      pickup: booking.pickupLocation || '',
+                      pickupLat: booking.pickupCoordinates?.lat?.toString() || '',
+                      pickupLng: booking.pickupCoordinates?.lng?.toString() || '',
+                      dropoff: booking.dropoffLocation || '',
+                      dropoffLat: booking.dropoffCoordinates?.lat?.toString() || '',
+                      dropoffLng: booking.dropoffCoordinates?.lng?.toString() || '',
+                    }
+                  });
+                }}
               >
                 <MapPin size={20} color={Colors.light.icon} />
                 <View style={styles.destinationText}>
