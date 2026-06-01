@@ -100,11 +100,12 @@ export function useRideSocket(bookingId?: string): UseRideSocketReturn {
           return;
         }
 
-        console.log('[RideSocket] URL =', RIDE_SOCKET_URL, '| bookingId:', bookingId);
+        console.log('[RideSocket] URL =', RIDE_SOCKET_URL, '| path:', RIDE_SOCKET_PATH, '| bookingId:', bookingId);
         const socket = io(RIDE_SOCKET_URL, {
           path: RIDE_SOCKET_PATH,
           auth: { token: `Bearer ${token}` },
-          transports: ['websocket'],
+          query: { token },
+          transports: ['websocket', 'polling'],
           reconnection: true,
           reconnectionAttempts: MAX_RECONNECT_ATTEMPTS,
           reconnectionDelay: 2000,
@@ -136,7 +137,7 @@ export function useRideSocket(bookingId?: string): UseRideSocketReturn {
 
         socket.on('connect_error', (err) => {
           reconnectAttemptRef.current += 1;
-          console.warn('[RideSocket] connect_error:', err.message);
+          console.warn('[RideSocket] connect_error:', err.message, '| url:', RIDE_SOCKET_URL, '| path:', RIDE_SOCKET_PATH);
 
           // Prevent infinite reconnect loops
           if (reconnectAttemptRef.current >= MAX_RECONNECT_ATTEMPTS) {
