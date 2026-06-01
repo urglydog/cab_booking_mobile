@@ -15,6 +15,9 @@ import { PaymentService, parsePaymentCallbackUrl } from '@/services/paymentServi
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 import { fetchRoute, generateRouteCoords } from '@/services/mapService';
 
+const ROUTE_REROUTE_THRESHOLD_METERS = 70;
+const ROUTE_REROUTE_COOLDOWN_MS = 8000;
+
 const isRoomUpdateForBooking = (payload: any, bookingId?: string) => {
   if (!bookingId) return true;
   const roomId = payload?.userId || payload?.bookingId || payload?.rideId || '';
@@ -77,6 +80,62 @@ const inferRideUiStatus = (payload: any) => {
   }
 
   return undefined;
+};
+
+const distanceMeters = (
+  a: { latitude: number; longitude: number },
+  b: { latitude: number; longitude: number }
+) => {
+  const latFactor = 111320;
+  const lngFactor = 111320 * Math.cos(((a.latitude + b.latitude) / 2) * Math.PI / 180);
+  const dLat = (a.latitude - b.latitude) * latFactor;
+  const dLng = (a.longitude - b.longitude) * lngFactor;
+  return Math.sqrt(dLat * dLat + dLng * dLng);
+};
+
+const distanceToSegmentMeters = (
+  point: { latitude: number; longitude: number },
+  start: { latitude: number; longitude: number },
+  end: { latitude: number; longitude: number }
+) => {
+  const latFactor = 111320;
+  const lngFactor = 111320 * Math.cos(((start.latitude + end.latitude + point.latitude) / 3) * Math.PI / 180);
+
+  const px = point.longitude * lngFactor;
+  const py = point.latitude * latFactor;
+  const sx = start.longitude * lngFactor;
+  const sy = start.latitude * latFactor;
+  const ex = end.longitude * lngFactor;
+  const ey = end.latitude * latFactor;
+
+  const dx = ex - sx;
+  const dy = ey - sy;
+  const lengthSquared = dx * dx + dy * dy;
+  if (lengthSquared === 0) {
+    return Math.sqrt((px - sx) ** 2 + (py - sy) ** 2);
+  }
+
+  const t = Math.max(0, Math.min(1, ((px - sx) * dx + (py - sy) * dy) / lengthSquared));
+  const projX = sx + t * dx;
+  const projY = sy + t * dy;
+  return Math.sqrt((px - projX) ** 2 + (py - projY) ** 2);
+};
+
+const shouldRerouteFromPolyline = (
+  current: { latitude: number; longitude: number },
+  route: { latitude: number; longitude: number }[],
+  destination: { latitude: number; longitude: number }
+) => {
+  if (route.length < 2) return true;
+  if (distanceMeters(current, destination) <= ROUTE_REROUTE_THRESHOLD_METERS) {
+    return false;
+  }
+
+  let minDistance = Number.POSITIVE_INFINITY;
+  for (let i = 0; i < route.length - 1; i += 1) {
+    minDistance = Math.min(minDistance, distanceToSegmentMeters(current, route[i], route[i + 1]));
+  }
+  return minDistance > ROUTE_REROUTE_THRESHOLD_METERS;
 };
 
 // Route generation utility imported from mapService
@@ -210,28 +269,61 @@ export default function MatchingScreen() {
 
   // Route polyline coordinates (real driving route with curved fallback)
   const [routeCoordinates, setRouteCoordinates] = useState<{ latitude: number; longitude: number }[]>([]);
+  const liveRouteRequestRef = useRef(0);
+  const lastRouteModeRef = useRef<string | null>(null);
+  const lastRouteFetchAtRef = useRef(0);
 
   useEffect(() => {
-    if (hasValidCoords) {
-      const from = { latitude: pLat, longitude: pLng };
-      const to = { latitude: dLat, longitude: dLng };
-      setRouteCoordinates(generateRouteCoords(from, to));
-
-      let isMounted = true;
-      fetchRoute(from, to).then((coords) => {
-        if (isMounted && coords && coords.length > 0) {
-          setRouteCoordinates(coords);
-        }
-      });
-      return () => {
-        isMounted = false;
-      };
-    } else {
+    if (!hasValidCoords) {
       const from = { latitude: 10.822, longitude: 106.687 };
       const to = { latitude: 10.779, longitude: 106.699 };
       setRouteCoordinates(generateRouteCoords(from, to));
+      lastRouteModeRef.current = null;
+      return;
     }
-  }, [pLat, pLng, dLat, dLng, hasValidCoords]);
+
+    const pickupCoords = { latitude: pLat, longitude: pLng };
+    const dropoffCoords = { latitude: dLat, longitude: dLng };
+    const isDriverHeadingToPickup = ['FOUND', 'ARRIVING'].includes(bookingStatus) && !!driverLocation;
+    const isTripInProgress = bookingStatus === 'STARTED' && !!driverLocation;
+
+    const from = isDriverHeadingToPickup
+      ? { latitude: driverLocation!.latitude, longitude: driverLocation!.longitude }
+      : isTripInProgress
+        ? { latitude: driverLocation!.latitude, longitude: driverLocation!.longitude }
+        : pickupCoords;
+    const to = isTripInProgress ? dropoffCoords : isDriverHeadingToPickup ? pickupCoords : dropoffCoords;
+    const routeMode = isTripInProgress ? 'driver-dropoff' : isDriverHeadingToPickup ? 'driver-pickup' : 'pickup-dropoff';
+
+    const now = Date.now();
+    const shouldFetch =
+      routeCoordinates.length === 0
+      || lastRouteModeRef.current !== routeMode
+      || (
+        (isDriverHeadingToPickup || isTripInProgress)
+        && now - lastRouteFetchAtRef.current >= ROUTE_REROUTE_COOLDOWN_MS
+        && shouldRerouteFromPolyline(from, routeCoordinates, to)
+      );
+
+    if (!shouldFetch) {
+      return;
+    }
+
+    lastRouteModeRef.current = routeMode;
+    lastRouteFetchAtRef.current = now;
+    setRouteCoordinates(generateRouteCoords(from, to));
+
+    let isMounted = true;
+    const requestId = ++liveRouteRequestRef.current;
+    fetchRoute(from, to).then((coords) => {
+      if (isMounted && requestId === liveRouteRequestRef.current && coords && coords.length > 0) {
+        setRouteCoordinates(coords);
+      }
+    });
+    return () => {
+      isMounted = false;
+    };
+  }, [pLat, pLng, dLat, dLng, hasValidCoords, bookingStatus, driverLocation, routeCoordinates]);
 
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
