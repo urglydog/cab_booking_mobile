@@ -117,22 +117,24 @@ export default function RootLayout() {
   const content = (
     <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
       <DeepLinkHandler />
-      <Stack>
-        <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
-        <Stack.Screen name="(auth)/forgot-password" options={{ headerShown: false }} />
-        <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
-        <Stack.Screen name="(ride)/matching" options={{ headerShown: false }} />
-        <Stack.Screen name="(ride)/detail" options={{ headerShown: false }} />
-        <Stack.Screen name="(review)/review" options={{ headerShown: false }} />
-        <Stack.Screen name="(payment)/payment" options={{ headerShown: false }} />
-        <Stack.Screen name="(payment)/payment-success" options={{ headerShown: false }} />
-        <Stack.Screen name="(payment)/payment-failed" options={{ headerShown: false }} />
-        <Stack.Screen name="(notification)/modal" options={{ presentation: 'modal', title: 'Notifications' }} />
-        <Stack.Screen name="(ride)/chat" options={{ headerShown: false }} />
-        <Stack.Screen name="(ai)/chat" options={{ headerShown: false }} />
-      </Stack>
+      <PaymentProvider>
+        <Stack>
+          <Stack.Screen name="(tabs)" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)/login" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)/register" options={{ headerShown: false }} />
+          <Stack.Screen name="(auth)/forgot-password" options={{ headerShown: false }} />
+          <Stack.Screen name="(ride)/booking" options={{ headerShown: false }} />
+          <Stack.Screen name="(ride)/matching" options={{ headerShown: false }} />
+          <Stack.Screen name="(ride)/detail" options={{ headerShown: false }} />
+          <Stack.Screen name="(review)/review" options={{ headerShown: false }} />
+          <Stack.Screen name="(payment)/payment" options={{ headerShown: false }} />
+          <Stack.Screen name="(payment)/payment-success" options={{ headerShown: false }} />
+          <Stack.Screen name="(payment)/payment-failed" options={{ headerShown: false }} />
+          <Stack.Screen name="(notification)/modal" options={{ presentation: 'modal', title: 'Notifications' }} />
+          <Stack.Screen name="(ride)/chat" options={{ headerShown: false }} />
+          <Stack.Screen name="(ai)/chat" options={{ headerShown: false }} />
+        </Stack>
+      </PaymentProvider>
       <StatusBar style="auto" />
     </ThemeProvider>
   );
@@ -140,9 +142,7 @@ export default function RootLayout() {
   if (userId) {
     return (
       <SocketProvider userId={userId}>
-        <PaymentProvider>
-          {content}
-        </PaymentProvider>
+        {content}
       </SocketProvider>
     );
   }
