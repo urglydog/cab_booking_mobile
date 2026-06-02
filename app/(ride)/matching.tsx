@@ -1,6 +1,6 @@
 import React, { useEffect, useState, useRef } from 'react';
 import {
-  StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Animated, Easing,
+  StyleSheet, View, Text, TouchableOpacity, ActivityIndicator, Alert, Animated, Easing, Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { ChevronLeft, MapPin, Navigation, Zap, Route, Clock, MessageSquare } from 'lucide-react-native';
@@ -14,6 +14,28 @@ import MapView, { Marker, Polyline } from 'react-native-maps';
 import { PaymentService, parsePaymentCallbackUrl } from '@/services/paymentService';
 import { formatVND, getSurgeLabel, getSurgeColor } from '@/services/pricingService';
 import { fetchRoute, generateRouteCoords } from '@/services/mapService';
+
+const BikeMarkerImage = require('../../assets/images/bike_marker.png');
+const CarMarkerImage = require('../../assets/images/car_marker.png');
+const SuvMarkerImage = require('../../assets/images/suv_marker.png');
+
+const TopDownCar = () => (
+  <View style={[styles.imageMarkerCircle, styles.carMarkerCircle]}>
+    <Image source={CarMarkerImage} style={styles.imageMarkerAsset} resizeMode="contain" />
+  </View>
+);
+
+const TopDownSUV = () => (
+  <View style={[styles.imageMarkerCircle, styles.suvMarkerCircle]}>
+    <Image source={SuvMarkerImage} style={styles.imageMarkerAsset} resizeMode="contain" />
+  </View>
+);
+
+const TopDownMotorcycle = () => (
+  <View style={[styles.imageMarkerCircle, styles.bikeMarkerCircle]}>
+    <Image source={BikeMarkerImage} style={styles.imageMarkerAsset} resizeMode="contain" />
+  </View>
+);
 
 const ROUTE_REROUTE_THRESHOLD_METERS = 70;
 const ROUTE_REROUTE_COOLDOWN_MS = 8000;
@@ -143,6 +165,7 @@ const shouldRerouteFromPolyline = (
 export default function MatchingScreen() {
   const router = useRouter();
   const params = useLocalSearchParams();
+  const mapRef = useRef<MapView | null>(null);
 
   const {
     bookingId,
@@ -277,12 +300,10 @@ export default function MatchingScreen() {
 
   useEffect(() => {
     if (!hasValidCoords) {
-      if (routeCoordinates.length === 0) {
-        const from = { latitude: 10.822, longitude: 106.687 };
-        const to = { latitude: 10.779, longitude: 106.699 };
-        setRouteCoordinates(generateRouteCoords(from, to));
-        lastRouteModeRef.current = null;
+      if (routeCoordinates.length > 0) {
+        setRouteCoordinates([]);
       }
+      lastRouteModeRef.current = null;
       return;
     }
 
@@ -315,7 +336,11 @@ export default function MatchingScreen() {
 
     lastRouteModeRef.current = routeMode;
     lastRouteFetchAtRef.current = now;
-    setRouteCoordinates(generateRouteCoords(from, to));
+    
+    // Only set fallback instantly if we don't have any route coordinates yet
+    if (routeCoordinates.length === 0) {
+      setRouteCoordinates(generateRouteCoords(from, to));
+    }
 
     let isMounted = true;
     const requestId = ++liveRouteRequestRef.current;
@@ -328,6 +353,36 @@ export default function MatchingScreen() {
       isMounted = false;
     };
   }, [pLat, pLng, dLat, dLng, hasValidCoords, bookingStatus, driverLocation, routeCoordinates]);
+
+  // Auto-adjust map camera to fit route, pickup, destination, and driver location
+  useEffect(() => {
+    if (!mapRef.current) return;
+
+    const coordsToFit: { latitude: number; longitude: number }[] = [];
+
+    if (hasValidCoords) {
+      coordsToFit.push({ latitude: pLat, longitude: pLng });
+      coordsToFit.push({ latitude: dLat, longitude: dLng });
+    }
+
+    if (driverLocation) {
+      coordsToFit.push({ latitude: driverLocation.latitude, longitude: driverLocation.longitude });
+    }
+
+    if (routeCoordinates && routeCoordinates.length > 0) {
+      coordsToFit.push(...routeCoordinates);
+    }
+
+    if (coordsToFit.length > 0) {
+      const timer = setTimeout(() => {
+        mapRef.current?.fitToCoordinates(coordsToFit, {
+          edgePadding: { top: 70, right: 70, bottom: 70, left: 70 },
+          animated: true,
+        });
+      }, 500);
+      return () => clearTimeout(timer);
+    }
+  }, [routeCoordinates, pLat, pLng, dLat, dLng, driverLocation, hasValidCoords]);
 
   const centerLat = hasValidCoords ? (pLat + dLat) / 2 : 10.800;
   const centerLng = hasValidCoords ? (pLng + dLng) / 2 : 106.690;
@@ -586,6 +641,7 @@ export default function MatchingScreen() {
       {/* Map */}
       <View style={styles.content}>
         <MapView
+          ref={mapRef}
           style={styles.map}
           initialRegion={{
             latitude: centerLat,
@@ -644,8 +700,22 @@ export default function MatchingScreen() {
               }}
               title="Tài xế"
               description="Vị trí hiện tại của tài xế"
-              pinColor="#3B82F6"
-            />
+              anchor={{ x: 0.5, y: 0.5 }}
+              flat={true}
+            >
+              <View style={styles.vehicleMarkerWrap}>
+                {String(parsedVehicleType).toUpperCase().includes('BIKE') ||
+                String(parsedVehicleType).toUpperCase().includes('MOTOR') ? (
+                  <TopDownMotorcycle />
+                ) : String(parsedVehicleType).toUpperCase().includes('7') ||
+                  String(parsedVehicleType).toUpperCase().includes('SUV') ||
+                  String(parsedVehicleType).toUpperCase().includes('VAN') ? (
+                  <TopDownSUV />
+                ) : (
+                  <TopDownCar />
+                )}
+              </View>
+            </Marker>
           )}
         </MapView>
 
@@ -1199,5 +1269,40 @@ const styles = StyleSheet.create({
     height: 12,
     borderRadius: 6,
     backgroundColor: '#10B981',
+  },
+  vehicleMarkerWrap: {
+    width: 50,
+    height: 50,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+  },
+  imageMarkerCircle: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 2,
+    alignItems: 'center',
+    justifyContent: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 3 },
+    shadowOpacity: 0.27,
+    shadowRadius: 4.65,
+    elevation: 6,
+  },
+  bikeMarkerCircle: {
+    borderColor: '#10B981',
+  },
+  carMarkerCircle: {
+    borderColor: '#6366F1',
+  },
+  suvMarkerCircle: {
+    borderColor: '#F97316',
+  },
+  imageMarkerAsset: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
   },
 });
