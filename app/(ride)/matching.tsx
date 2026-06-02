@@ -171,11 +171,13 @@ export default function MatchingScreen() {
   const [matchedDriver, setMatchedDriver] = useState<any>(null);
   const [elapsedSeconds, setElapsedSeconds] = useState(0);
   const [statusSubtext, setStatusSubtext] = useState<string>('Hệ thống đang kết nối bạn với tài xế gần nhất');
+  const [hasFetchedOnce, setHasFetchedOnce] = useState(false);
 
   const pulse = useRef(new Animated.Value(0)).current;
   const sweep = useRef(new Animated.Value(0)).current;
 
   const isFinding = bookingStatus === 'FINDING' || bookingStatus === 'CREATED' || bookingStatus === 'PENDING_DRIVER';
+  const isCancelVisible = hasFetchedOnce && isFinding;
 
   useEffect(() => {
     if (!isFinding) {
@@ -275,10 +277,12 @@ export default function MatchingScreen() {
 
   useEffect(() => {
     if (!hasValidCoords) {
-      const from = { latitude: 10.822, longitude: 106.687 };
-      const to = { latitude: 10.779, longitude: 106.699 };
-      setRouteCoordinates(generateRouteCoords(from, to));
-      lastRouteModeRef.current = null;
+      if (routeCoordinates.length === 0) {
+        const from = { latitude: 10.822, longitude: 106.687 };
+        const to = { latitude: 10.779, longitude: 106.699 };
+        setRouteCoordinates(generateRouteCoords(from, to));
+        lastRouteModeRef.current = null;
+      }
       return;
     }
 
@@ -363,10 +367,12 @@ export default function MatchingScreen() {
           setBookingStatus(booking.status);
         }
       }
+      setHasFetchedOnce(true);
     } catch (err: any) {
       if (err?.response?.status !== 404) {
         console.log('Could not fetch booking info:', err?.message);
       }
+      setHasFetchedOnce(true);
     }
   };
 
@@ -563,6 +569,15 @@ export default function MatchingScreen() {
           <ChevronLeft size={28} color="#111" />
         </TouchableOpacity>
         <Text style={styles.headerTitle}>Trạng thái chuyến xe</Text>
+        
+        {/* SOS button */}
+        <TouchableOpacity 
+          style={styles.sosButton} 
+          onPress={() => Alert.alert('📞 SOS CẢNH SÁT', 'Đang thực hiện kết nối khẩn cấp giả lập tới số 113...')}
+        >
+          <Text style={styles.sosButtonText}>SOS 113</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity onPress={() => router.replace('/(tabs)')} style={styles.homeButton}>
           <Text style={styles.homeButtonText}>Home</Text>
         </TouchableOpacity>
@@ -811,15 +826,11 @@ export default function MatchingScreen() {
           {/* ── Finding / Cancel ─────────────────────────── */}
           {['FINDING', 'CREATED', 'FOUND', 'ARRIVING', 'STARTED'].includes(bookingStatus) && (
             <View style={styles.findingContainer}>
-              {isFinding ? (
+              {isCancelVisible ? (
                 <Text style={styles.findingSubtext}>
                   {statusSubtext}
                 </Text>
-              ) : (
-                <Text style={[styles.findingSubtext, { color: '#9CA3AF', marginBottom: 12 }]}>
-                  Bạn có thể hủy chuyến đi trước khi hoàn tất hoặc thanh toán.
-                </Text>
-              )}
+              ) : null}
               {isActivelySearching && elapsedSeconds > 0 && (
                 <Text style={styles.elapsedText}>
                   {Math.floor(elapsedSeconds / 60)}:{String(elapsedSeconds % 60).padStart(2, '0')}
@@ -828,14 +839,16 @@ export default function MatchingScreen() {
               <TouchableOpacity
                 style={[
                   styles.cancelButton,
-                  !isFinding && {
-                    backgroundColor: '#FEE2E2',
-                    borderRadius: 14,
+                  !isCancelVisible && {
+                    backgroundColor: 'transparent',
+                    borderColor: 'transparent',
+                    borderWidth: 0,
+                    shadowOpacity: 0,
+                    elevation: 0,
+                    opacity: 0,
                     paddingVertical: 14,
                     width: '100%',
                     alignItems: 'center',
-                    borderWidth: 1,
-                    borderColor: '#FECACA',
                   }
                 ]}
                 onPress={() => {
@@ -861,7 +874,7 @@ export default function MatchingScreen() {
                   );
                 }}
               >
-                <Text style={[styles.cancelText, !isFinding && { color: '#EF4444', fontWeight: '800' }]}>
+                <Text style={[styles.cancelText, !isCancelVisible && { color: 'transparent', fontWeight: '800' }]}>
                   Hủy chuyến
                 </Text>
               </TouchableOpacity>
@@ -909,6 +922,23 @@ const styles = StyleSheet.create({
   },
   backButton: { padding: 5 },
   headerTitle: { fontSize: 18, fontWeight: 'bold', marginLeft: 10, flex: 1 },
+  sosButton: {
+    backgroundColor: '#EF4444',
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 15,
+    marginRight: 8,
+    shadowColor: '#EF4444',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.4,
+    shadowRadius: 3,
+    elevation: 3,
+  },
+  sosButtonText: {
+    fontSize: 12,
+    fontWeight: 'bold',
+    color: '#FFF',
+  },
   homeButton: {
     paddingHorizontal: 12, paddingVertical: 6,
     backgroundColor: '#F0F0F0', borderRadius: 15,
